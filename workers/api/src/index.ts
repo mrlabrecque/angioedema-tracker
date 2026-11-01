@@ -2,9 +2,10 @@ import type { Env } from "./env";
 import { corsHeaders, json } from "./http";
 import { ConfigError, verifyPassphrase } from "./auth/passphrase";
 import { signToken, verifyToken, type TokenPayload } from "./auth/token";
-import { dbCheck } from "./db";
+import { DbTimeout, dbCheck } from "./db";
 import { analytics } from "./analytics";
 import { summary, trends } from "./dashboard";
+import { exportCsv, exportReport } from "./export";
 import {
   addChild,
   changeChild,
@@ -108,6 +109,8 @@ async function route(request: Request, env: Env, ec: ExecutionContext): Promise<
     path === "/api/dashboard/summary" ||
     path === "/api/dashboard/trends" ||
     path === "/api/analytics" ||
+    path === "/api/export/csv" ||
+    path === "/api/export/report" ||
     episodeMatch !== null;
   if (!isKnown) return json(request, env, { error: "not_found" }, 404);
 
@@ -128,6 +131,8 @@ async function route(request: Request, env: Env, ec: ExecutionContext): Promise<
   if (path === "/api/dashboard/summary" && m === "GET") return summary(c);
   if (path === "/api/dashboard/trends" && m === "GET") return trends(c);
   if (path === "/api/analytics" && m === "GET") return analytics(c);
+  if (path === "/api/export/csv" && m === "GET") return exportCsv(c);
+  if (path === "/api/export/report" && m === "GET") return exportReport(c);
   if (path === "/api/episodes") {
     if (m === "GET") return listEpisodes(c);
     if (m === "POST") return createEpisode(c);
@@ -161,6 +166,7 @@ export default {
     } catch (err) {
       // Only our own config errors are logged (their messages never hold values).
       if (err instanceof ConfigError) console.log(`config error: ${err.message}`);
+      if (err instanceof DbTimeout) console.log(`database timeout: ${err.message}`);
       // Never include error details: they may contain connection strings or data.
       res = json(request, env, { error: "internal_error" }, 500);
     }

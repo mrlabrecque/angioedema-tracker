@@ -4,6 +4,8 @@ import worker from "../src/index";
 import { signToken, verifyToken } from "../src/auth/token";
 import type { Env } from "../src/env";
 import { pickUnit } from "../src/analytics";
+import { DbTimeout, withTimeout } from "../src/db";
+import { buildCsv, csvCell, localStamp } from "../src/csv";
 import { safeTimeZone } from "../src/dashboard";
 import { createEpisodeInput, exposureInput, treatmentInput, updateEpisodeInput } from "../src/validation";
 
@@ -137,6 +139,8 @@ describe("protected routes", () => {
       ["GET", "/api/dashboard/summary"],
       ["GET", "/api/dashboard/trends"],
       ["GET", "/api/analytics"],
+      ["GET", "/api/export/csv"],
+      ["GET", "/api/export/report"],
       ["GET", "/api/symptoms"],
       ["GET", "/api/exposures"],
     ];
@@ -247,5 +251,52 @@ describe("analytics bucketing", () => {
     expect(pickUnit(...at(180))).toBe("month");
     expect(pickUnit(...at(1000))).toBe("month");
     expect(pickUnit(...at(3000))).toBe("year");
+  });
+});
+
+describe("csv export helpers", () => {
+  it("quotes commas, quotes and newlines", () => {
+    expect(csvCell("plain")).toBe("plain");
+    expect(csvCell("a,b")).toBe('"a,b"');
+    expect(csvCell('say "hi"')).toBe('"say ""hi"""');
+    expect(csvCell("line1\nline2")).toBe('"line1\nline2"');
+    expect(csvCell(null)).toBe("");
+    expect(csvCell(7)).toBe("7");
+  });
+
+  it("neutralises spreadsheet formula injection", () => {
+    for (const evil of ["=1+1", "+SUM(A1)", "-2+3", "@cmd", "\tcmd", '=HYPERLINK("http://x")']) {
+      expect(csvCell(evil).replace(/^"/, "").startsWith("'")).toBe(true);
+    }
+    expect(csvCell("5 mg")).toBe("5 mg");
+  });
+
+  it("builds a BOM + CRLF document", () => {
+    const out = buildCsv(["a", "b"], [["1", "x,y"]]);
+    expect(out.startsWith("\uFEFF")).toBe(true);
+    expect(out).toBe("\uFEFFa,b\r\n1,\"x,y\"\r\n");
+  });
+
+  it("formats local time in the requested zone", () => {
+    expect(localStamp("2026-03-13T22:00:00Z", "America/New_York")).toBe("2026-03-13 18:00");
+    expect(localStamp("2026-03-13T22:00:00Z", "UTC")).toBe("2026-03-13 22:00");
+    expect(localStamp(null, "UTC")).toBe("");
+  });
+});
+
+describe("database deadlines", () => {
+  it("fails fast when the database never answers (a silently dead connection)", async () => {
+    const started = Date.now();
+    await expect(withTimeout(new Promise(() => {}), 50, "test")).rejects.toBeInstanceOf(DbTimeout);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it("passes results and errors through untouched", async () => {
+    await expect(withTimeout(Promise.resolve(7), 1000, "x")).resolves.toBe(7);
+    await expect(withTimeout(Promise.reject(new Error("boom")), 1000, "x")).rejects.toThrow("boom");
+  });
+
+  it("the timeout message carries no data", () => {
+    expect(new DbTimeout("database operation timed out after 25000ms").message).not.toMatch(/postgres|password|@/);
   });
 });

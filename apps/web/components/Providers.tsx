@@ -23,8 +23,8 @@ function Frame({ children }: { children: React.ReactNode }) {
   if (!session) return <AccessScreen />;
   const at = (p: string) => (p === "/" ? path === "/" : path.startsWith(p));
   return (
-    <div className="mx-auto min-h-dvh max-w-lg px-4 pb-32">
-      <header className="flex h-16 items-center justify-between">
+    <div className="mx-auto min-h-dvh max-w-lg px-4 pb-32 print:max-w-none print:p-0">
+      <header className="flex h-16 items-center justify-between print:hidden">
         <Link href="/" className="text-lg font-semibold tracking-tight">
           Angioedema Tracker
         </Link>
@@ -35,7 +35,7 @@ function Frame({ children }: { children: React.ReactNode }) {
       {children}
       <nav
         aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]"
+        className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] print:hidden"
       >
         <div className="mx-auto flex max-w-lg items-center px-2">
           <NavLink href="/" label="Overview" active={at("/")} />

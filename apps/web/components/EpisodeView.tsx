@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import CategoryPicker from "@/components/CategoryPicker";
+import CsvExport from "@/components/CsvExport";
 import { Card, Chip, Field, SeverityPicker, StatusBadge, btnPrimary, btnSecondary, inputCls } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -259,6 +260,13 @@ export default function EpisodeView() {
         <br />
         Created {formatDateTime(ep.createdAt)} · Updated {formatDateTime(ep.updatedAt)}
       </p>
+
+      <div className="space-y-3">
+        <CsvExport query={`id=${ep.id}`} filename={`angioedema-episode-${ep.onsetAt.slice(0, 10)}.csv`} label="Export this episode (CSV)" />
+        <Link href={`/report/?id=${ep.id}`} className={`${btnSecondary} w-full`}>
+          Printable report
+        </Link>
+      </div>
 
       <button onClick={remove} className="min-h-11 text-sm text-danger">
         Remove episode

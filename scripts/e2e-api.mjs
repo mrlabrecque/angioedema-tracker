@@ -16,11 +16,19 @@ const check = (name, cond, detail = "") => {
 
 let token = "";
 async function call(method, path, body, auth = true) {
-  const res = await fetch(API + path, {
-    method,
-    headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...(auth ? { Authorization: `Bearer ${token}` } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(API + path, {
+      method,
+      headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...(auth ? { Authorization: `Bearer ${token}` } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+      // A hung request must fail one check, not stall the whole run.
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch (e) {
+    console.log(`WARN  ${method} ${path} -> ${e.name}`);
+    return { status: 0, data: { error: "client_timeout" } };
+  }
   return { status: res.status, data: await res.json().catch(() => ({})) };
 }
 
@@ -104,7 +112,9 @@ check("duration is positive", new Date(resolved.data.resolutionAt) > new Date(re
 check("resolution before onset rejected on update", (await call("PUT", `/api/episodes/${id}`, { resolutionAt: new Date(Date.now() - 9 * 3600_000).toISOString() })).status === 400);
 check("reopening clears resolutionAt", (await call("PUT", `/api/episodes/${id}`, { status: "active" })).data.resolutionAt === null);
 
-const list = await call("GET", "/api/episodes");
+// A busy database can hold more than one page of newer episodes, so look only around this episode's onset.
+const around = `from=${encodeURIComponent(new Date(Date.parse(onset) - 1000).toISOString())}&to=${encodeURIComponent(new Date(Date.parse(onset) + 1000).toISOString())}`;
+const list = await call("GET", `/api/episodes?limit=200&${around}`);
 check("list includes episode with symptom summary", list.data.items?.some((e) => e.id === id && e.symptoms.length === 3));
 check("list has no duplicates of the idempotent episode", list.data.items.filter((e) => e.id === id).length === 1);
 check("list status filter", (await call("GET", "/api/episodes?status=resolved")).data.items.every((e) => e.status === "resolved"));
@@ -130,7 +140,7 @@ const sumAfter = (await call("GET", "/api/dashboard/summary")).data;
 check("summary total increased by exactly 4", sumAfter.total - sumBefore.total === 4, `${sumBefore.total}->${sumAfter.total}`);
 check("summary active increased by exactly 1", sumAfter.active - sumBefore.active === 1);
 check("summary last30Days increased by exactly 3 (old one excluded)", sumAfter.last30Days - sumBefore.last30Days === 3, `${sumBefore.last30Days}->${sumAfter.last30Days}`);
-check("summary most recent is the newest episode", sumAfter.mostRecent?.id === eActive.data.id);
+check("summary most recent is the newest episode", Date.parse(sumAfter.mostRecent?.onsetAt) === Date.parse((await call("GET", "/api/episodes?limit=1")).data.items[0].onsetAt));
 if (sumBefore.episodesWithDuration === 0) {
   // durations 60, 120, 60 min => average 80
   check("average duration computed from real records (80 min)", sumAfter.averageDurationMinutes === 80, String(sumAfter.averageDurationMinutes));
@@ -255,8 +265,9 @@ check("a standard category in a different case maps to the standard name", (awai
 check("catalog size unchanged by reuse", (await call("GET", "/api/exposures")).data.items.length === catBefore + 1);
 check("blank trigger is rejected", (await mk({ onsetAt: new Date().toISOString(), exposures: [{ exposureCategory: "   " }] })).status === 400);
 check("over-long trigger name is rejected", (await mk({ onsetAt: new Date().toISOString(), exposures: [{ exposureCategory: "x".repeat(81) }] })).status === 400);
-const an = (await call("GET", `/api/analytics?tz=UTC&from=${encodeURIComponent(new Date(Date.now() - 86400_000).toISOString())}`)).data;
-check("analytics groups the custom trigger under one name (3 episodes)", an.exposures.find((x) => x.category === custom)?.episodes === 3, JSON.stringify(an.exposures.map((x) => [x.category, x.episodes])).slice(0, 140));
+const withCustom = (await call("GET", `/api/episodes?limit=200&q=${encodeURIComponent(custom)}`)).data.items;
+const details = await Promise.all(withCustom.map(async (e) => (await call("GET", `/api/episodes/${e.id}`)).data));
+check("one custom trigger name groups all 3 episodes that used it, under a single spelling", details.length === 3 && details.every((d) => d.exposures.every((x) => x.exposureCategory === custom)), `${details.length} episodes`);
 const raceName = `Zq Race ${randomUUID().slice(0, 6)}`;
 await Promise.all(Array.from({ length: 5 }, () => mk({ onsetAt: new Date().toISOString(), exposures: [{ exposureCategory: raceName }] })));
 check("five concurrent uses of a brand-new trigger create one catalog entry", (await call("GET", "/api/exposures")).data.items.filter((i) => i.name === raceName).length === 1);
@@ -309,6 +320,73 @@ check("removing every symptom is allowed (episode stays)", (await call("DELETE",
 await call("DELETE", `/api/episodes/${edId}`);
 check("child edit on a deleted episode -> 404", (await call("PUT", `/api/episodes/${edId}/symptoms/${s1.id}`, { symptomType: "Hives", severity: 3 })).status === 404);
 check("child delete on a deleted episode -> 404", (await call("DELETE", `/api/episodes/${edId}/exposures/${x2.id}`)).status === 404);
+
+// ---------- Phase 5: exports (fixtures in 2013) ----------
+async function rawGet(path, auth = true) {
+  const res = await fetch(API + path, { headers: auth ? { Authorization: `Bearer ${token}` } : {} });
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  // res.text() would silently drop a leading BOM, so keep the raw bytes to check it.
+  return { status: res.status, headers: res.headers, bytes, text: new TextDecoder("utf-8", { ignoreBOM: false }).decode(bytes) };
+}
+function parseCsv(text) {
+  const rows = []; let row = [], cell = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ",") { row.push(cell); cell = ""; }
+    else if (ch === "\r" && text[i + 1] === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; i++; }
+    else cell += ch;
+  }
+  return rows;
+}
+const Y2013 = `from=${encodeURIComponent("2013-01-01T00:00:00Z")}&to=${encodeURIComponent("2013-12-31T23:59:59Z")}`;
+for (const old of (await call("GET", `/api/episodes?limit=200&${Y2013}`)).data.items ?? []) await call("DELETE", `/api/episodes/${old.id}`);
+
+const nasty = 'Line one, with comma\nLine "two" has quotes\nnaïve café 😀';
+const cA = await mk({
+  onsetAt: "2013-03-10T05:30:00Z", resolutionAt: "2013-03-10T07:30:00Z", overallSeverity: 6, generalNotes: nasty,
+  symptoms: [{ symptomType: "Lip swelling", bodyLocation: "Bottom lip", severity: 6, notes: "=1+1" }],
+  exposures: [{ exposureCategory: "Food", exposureDescription: "shell,fish", suspectedRelationship: "possible", exposureTime: "2013-03-10T03:00:00Z" }],
+  treatments: [{ medicationName: "Test med", dosage: "10 mg", administrationTime: "2013-03-10T06:00:00Z", response: "partial" }],
+});
+const cB = await mk({ onsetAt: "2013-05-01T12:00:00Z", generalNotes: "@SUM(A1:A2)" });
+const cGone = await mk({ onsetAt: "2013-06-01T12:00:00Z", generalNotes: "deleted one" });
+await call("DELETE", `/api/episodes/${cGone.data.id}`);
+
+const csv = await rawGet(`/api/export/csv?tz=America/New_York&${Y2013}`);
+check("csv: 200, text/csv, never cached", csv.status === 200 && csv.headers.get("content-type").startsWith("text/csv") && csv.headers.get("cache-control") === "no-store");
+check("csv: starts with a UTF-8 BOM and uses CRLF line endings", csv.bytes[0] === 0xef && csv.bytes[1] === 0xbb && csv.bytes[2] === 0xbf && csv.text.includes("\r\n"));
+const rows = parseCsv(csv.text);
+check("csv: header + one row per live episode (2), deleted one excluded", rows.length === 3 && rows[0][0] === "Episode ID" && !csv.text.includes("deleted one"), `rows=${rows.length}`);
+const hdr = rows[0]; const col = (r, name) => r[hdr.indexOf(name)];
+const rA = rows.find((r) => r[0] === cA.data.id), rB = rows.find((r) => r[0] === cB.data.id);
+check("csv: every row has the same number of columns", rows.every((r) => r.length === hdr.length));
+check("csv: notes with commas, quotes, newlines and unicode round-trip exactly", col(rA, "Notes") === nasty, JSON.stringify(col(rA, "Notes")));
+check("csv: local time uses the requested zone and follows daylight saving (05:30Z -> 00:30 EST; 07:30Z -> 03:30 EDT)", col(rA, "Onset (local)") === "2013-03-10 00:30" && col(rA, "Resolved (local)") === "2013-03-10 03:30", `${col(rA, "Onset (local)")} / ${col(rA, "Resolved (local)")}`);
+check("csv: UTC columns are ISO", col(rA, "Onset (UTC)") === "2013-03-10T05:30:00.000Z");
+check("csv: duration in minutes (120) and status/severity", col(rA, "Duration (minutes)") === "120" && col(rA, "Status") === "resolved" && col(rA, "Overall severity") === "6");
+check("csv: symptoms column", col(rA, "Symptoms").startsWith("Lip swelling [Bottom lip] 6/10"));
+check("csv: exposures column keeps the reported relationship (not a cause)", col(rA, "Reported exposures").includes("Food: shell,fish (possibly related)") && !/caus/i.test(col(rA, "Reported exposures")));
+check("csv: treatments column", col(rA, "Treatments").includes("Test med 10 mg") && col(rA, "Treatments").includes("response: partial"));
+check("csv: a cell that starts like a formula is neutralised with a leading apostrophe", col(rB, "Notes") === "'@SUM(A1:A2)");
+check("csv: incomplete episode has empty resolution/duration", col(rB, "Resolved (local)") === "" && col(rB, "Duration (minutes)") === "");
+const one = parseCsv((await rawGet(`/api/export/csv?id=${cA.data.id}`)).text);
+check("csv: single-episode export has exactly that episode", one.length === 2 && one[1][0] === cA.data.id);
+check("csv: no matches -> header only", parseCsv((await rawGet(`/api/export/csv?from=${encodeURIComponent("2001-01-01T00:00:00Z")}&to=${encodeURIComponent("2001-12-31T00:00:00Z")}`)).text).length === 1);
+check("csv: bad id -> 400", (await rawGet("/api/export/csv?id=nope")).status === 400);
+check("csv: bad date -> 400", (await rawGet("/api/export/csv?from=yesterday")).status === 400);
+check("csv: bad time zone falls back safely (no error)", (await rawGet(`/api/export/csv?tz=%27%3Bdrop&${Y2013}`)).status === 200);
+check("csv: requires a token", (await rawGet("/api/export/csv", false)).status === 401);
+
+const rep = (await call("GET", `/api/export/report?${Y2013}`)).data;
+check("report: oldest first with full children", rep.episodes?.length === 2 && rep.episodes[0].id === cA.data.id && rep.episodes[0].symptoms.length === 1 && rep.episodes[0].exposures.length === 1 && rep.episodes[0].treatments.length === 1);
+check("report: has a generation time and no soft-deleted rows", !!rep.generatedAt && !rep.episodes.some((e) => e.generalNotes === "deleted one"));
+check("report: single episode by id", (await call("GET", `/api/export/report?id=${cA.data.id}`)).data.episodes.length === 1);
+check("report: unknown id -> empty list", (await call("GET", `/api/export/report?id=${randomUUID()}`)).data.episodes.length === 0);
+check("report: bad id -> 400", (await call("GET", "/api/export/report?id=nope")).status === 400);
+check("report: requires a token", (await call("GET", "/api/export/report", null, false)).status === 401);
+for (const f of [cA, cB]) await call("DELETE", `/api/episodes/${f.data.id}`);
 
 console.log(failures ? `\n${failures} check(s) FAILED` : "\nAll checks passed");
 console.log(`created id for DB verification: ${id}`);

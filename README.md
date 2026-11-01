@@ -3,7 +3,7 @@
 Private, single-user health log. Static Next.js frontend (GitHub Pages) → Cloudflare Worker API → Neon PostgreSQL (Drizzle).
 Not a diagnostic or treatment tool.
 
-**Status:** Phases 1-4: passphrase access, protected API, episode logging, dashboard, history search/filters, and trends/analytics.
+**Status:** Phases 1-5: passphrase access, protected API, episode logging, dashboard, history, trends, installable iPhone app, CSV export and a printable report.
 
 ```
 apps/web          Next.js static export (GitHub Pages)
@@ -25,4 +25,4 @@ npm run db:migrate       # needs packages/database/.env with DATABASE_URL (owner
 npm run -s set-passphrase  # sets AUTH_PASSPHRASE_HASH on the Worker (no copy/paste)
 ```
 
-See [docs/api.md](docs/api.md), [docs/setup.md](docs/setup.md), [docs/security.md](docs/security.md), [docs/migrations.md](docs/migrations.md).
+See [docs/api.md](docs/api.md), [docs/ios-install.md](docs/ios-install.md), [docs/security-testing.md](docs/security-testing.md), [docs/reliability.md](docs/reliability.md), [docs/setup.md](docs/setup.md), [docs/security.md](docs/security.md), [docs/migrations.md](docs/migrations.md).

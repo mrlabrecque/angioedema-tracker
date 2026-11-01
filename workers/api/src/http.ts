@@ -39,3 +39,10 @@ export function json(
     },
   });
 }
+
+export function text(request: Request, env: Env, body: string, contentType: string, status = 200): Response {
+  return new Response(body, {
+    status,
+    headers: { "Content-Type": contentType, ...SECURITY_HEADERS, ...corsHeaders(request, env) },
+  });
+}

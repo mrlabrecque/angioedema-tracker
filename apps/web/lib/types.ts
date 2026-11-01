@@ -65,3 +65,30 @@ export interface Trends {
   symptomFrequency: { name: string; episodes: number }[];
   exposureReports: { category: string; episodes: number; clinicianConfirmed: number }[];
 }
+
+export interface Analytics {
+  range: { from: string; to: string; unit: "week" | "month" | "year"; timeZone: string };
+  totals: {
+    episodes: number;
+    episodesWithDuration: number;
+    averageDurationMinutes: number | null;
+    medianDurationMinutes: number | null;
+    longestDurationMinutes: number | null;
+    averageSeverity: number | null;
+    episodesWithSeverity: number;
+  };
+  frequency: { start: string; episodes: number; averageSeverity: number | null; averageDurationMinutes: number | null }[];
+  severityDistribution: { severity: number; episodes: number }[];
+  symptoms: { name: string; episodes: number; averageSeverity: number }[];
+  locations: { name: string; episodes: number }[];
+  exposures: { category: string; episodes: number; possible: number; suspected: number; clinicianConfirmed: number }[];
+  exposureDetails: { category: string; description: string; episodes: number }[];
+  gaps: {
+    count: number;
+    averageDays: number | null;
+    medianDays: number | null;
+    shortestDays: number | null;
+    longestDays: number | null;
+    recent: { date: string; days: number }[];
+  };
+}

@@ -1,4 +1,4 @@
-# API (Phases 2-3)
+# API (Phases 2-4)
 
 All routes except `/api/health` and `/api/auth/login` need `Authorization: Bearer <token>`. Responses are `no-store`.
 
@@ -13,6 +13,7 @@ All routes except `/api/health` and `/api/auth/login` need `Authorization: Beare
 | GET | `/api/episodes/:id` | full detail |
 | PUT | `/api/episodes/:id` | partial update. `status: "resolved"` stamps `resolutionAt` if missing; `status: "active"` clears it; resolution before onset is rejected |
 | DELETE | `/api/episodes/:id` | soft delete (row kept, hidden) |
+| GET | `/api/analytics?from=&to=&tz=` | descriptive statistics for a date range (omit `from` for all time): totals and duration/severity stats, frequency per week/month/year (bucket size chosen from the range), severity distribution, symptom and swelling-location counts, reported-exposure counts, and time between episodes. Ranges over 20 years or with `from` after `to` return 400 |
 | POST | `/api/episodes/:id/symptoms`, `/exposures`, `/treatments` | add to an existing episode; returns the full detail |
 
 Exposures default to `suspectedRelationship: "unknown"`; nothing is ever set to `confirmed_by_clinician` automatically.
@@ -22,3 +23,6 @@ Exposures default to `suspectedRelationship: "unknown"`; nothing is ever set to 
 ```bash
 API_URL=http://localhost:8787 PASSPHRASE=... node scripts/e2e-api.mjs
 ```
+
+## Analytics are descriptive, not causal
+Exposure figures count what was *reported alongside* episodes. Only flare-ups are logged, so there is no baseline of how often the same exposures occur without a flare; the app never labels an exposure as a cause. `confirmed_by_clinician` appears only when you set it yourself.

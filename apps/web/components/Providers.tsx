@@ -39,14 +39,16 @@ function Frame({ children }: { children: React.ReactNode }) {
       >
         <div className="mx-auto flex max-w-lg items-center px-2">
           <NavLink href="/" label="Overview" active={at("/")} />
+          <NavLink href="/history/" label="History" active={at("/history")} />
           <Link
             href="/log/"
-            className="mx-2 -mt-5 flex h-14 w-14 items-center justify-center rounded-full bg-accent text-3xl font-light leading-none text-accent-ink shadow-lg"
+            className="mx-1 -mt-5 flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-accent text-3xl font-light leading-none text-accent-ink shadow-lg"
             aria-label="Log a flare-up"
           >
             +
           </Link>
-          <NavLink href="/history/" label="History" active={at("/history")} />
+          <NavLink href="/trends/" label="Trends" active={at("/trends")} />
+          <NavLink href="/settings/" label="Settings" active={at("/settings")} />
         </div>
       </nav>
     </div>

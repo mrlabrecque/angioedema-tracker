@@ -3,7 +3,7 @@
 Private, single-user health log. Static Next.js frontend (GitHub Pages) → Cloudflare Worker API → Neon PostgreSQL (Drizzle).
 Not a diagnostic or treatment tool.
 
-**Status:** Phases 1-2: passphrase access, protected API, episode logging (create, edit, resolve, add symptoms/exposures/treatments).
+**Status:** Phases 1-4: passphrase access, protected API, episode logging, dashboard, history search/filters, and trends/analytics.
 
 ```
 apps/web          Next.js static export (GitHub Pages)

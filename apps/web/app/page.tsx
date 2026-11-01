@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { HBars, MonthBars } from "@/components/Charts";
 import EpisodeRow from "@/components/EpisodeRow";
-import SystemStatus from "@/components/SystemStatus";
 import { Card } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -112,7 +111,7 @@ export default function Overview() {
       ) : (
         <>
           <Card title="Flare-ups per month">
-            <MonthBars data={trends.episodesByMonth.map((m) => ({ label: monthLabel(m.month), value: m.episodes }))} />
+            <MonthBars title="Flare-ups per month" data={trends.episodesByMonth.map((m) => ({ label: monthLabel(m.month), value: m.episodes }))} />
           </Card>
 
           <Card title="Most reported symptoms">
@@ -154,7 +153,6 @@ export default function Overview() {
         </ul>
       </Card>
 
-      <SystemStatus />
     </main>
   );
 }

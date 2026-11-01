@@ -176,6 +176,68 @@ check("deleted episode leaves the dashboard totals", sumDel.total === sumAfter.t
 check("deleted episode leaves search", (await search(`q=${tag}`)).items.length === 3);
 check("deleted episode leaves symptom stats", ((await call("GET", "/api/dashboard/trends")).data.symptomFrequency.find((s) => s.name === "Itching")?.episodes ?? 0) === (tr.symptomFrequency.find((s) => s.name === "Itching")?.episodes ?? 0) - 1);
 
+// ---------- Phase 4: analytics with hand-computed fixtures (all in 2015, UTC) ----------
+const A = async (qs) => (await call("GET", `/api/analytics?tz=UTC&${qs}`)).data;
+const Y2015 = `from=${encodeURIComponent("2015-01-01T00:00:00Z")}&to=${encodeURIComponent("2015-12-31T23:59:59Z")}`;
+// Clean leftovers from an interrupted earlier run, so reruns start from a known state.
+for (const old of (await call("GET", `/api/episodes?limit=200&${Y2015}`)).data.items ?? []) await call("DELETE", `/api/episodes/${old.id}`);
+
+const at = (iso, plusMin = 0) => new Date(Date.parse(iso) + plusMin * 60000).toISOString();
+const fx = (onset, resolveMin, severity, symptoms, exposures) =>
+  mk({ onsetAt: onset, resolutionAt: resolveMin === null ? null : at(onset, resolveMin), overallSeverity: severity, symptoms, exposures });
+const fA = await fx("2015-01-10T12:00:00Z", 120, 4,
+  [{ symptomType: "Lip swelling", bodyLocation: "Lip", severity: 4 }, { symptomType: "Hives", severity: 3 }],
+  [{ exposureCategory: "Food", exposureDescription: "Shellfish", suspectedRelationship: "possible" }]);
+const fB = await fx("2015-01-20T12:00:00Z", 240, 8,
+  [{ symptomType: "Lip swelling", bodyLocation: "lip", severity: 8 }, { symptomType: "Tongue swelling", bodyLocation: "Tongue", severity: 5 }],
+  [{ exposureCategory: "Food", exposureDescription: " shellfish ", suspectedRelationship: "possible" }, { exposureCategory: "Stress" }]);
+const fC = await fx("2015-03-01T12:00:00Z", null, 6,
+  [{ symptomType: "Hives", severity: 6 }],
+  [{ exposureCategory: "Food", exposureDescription: "peanut", suspectedRelationship: "confirmed_by_clinician" }]);
+const fD = await fx("2015-03-05T12:00:00Z", 60, 8, [], []);
+check("created 4 analytics fixtures", [fA, fB, fC, fD].every((r) => r.status === 201));
+
+const y = await A(Y2015);
+check("range echo uses month buckets for a year", y.range.unit === "month" && y.range.timeZone === "UTC");
+check("episodes in range = 4", y.totals.episodes === 4, String(y.totals.episodes));
+check("average duration = 140 min", y.totals.averageDurationMinutes === 140, String(y.totals.averageDurationMinutes));
+check("median duration = 120 min", y.totals.medianDurationMinutes === 120);
+check("longest duration = 240 min", y.totals.longestDurationMinutes === 240);
+check("episodes with a duration = 3 (active one excluded)", y.totals.episodesWithDuration === 3);
+check("average severity = 6.5", y.totals.averageSeverity === 6.5, String(y.totals.averageSeverity));
+check("12 month buckets", y.frequency.length === 12 && y.frequency[0].start === "2015-01-01" && y.frequency[11].start === "2015-12-01");
+check("frequency: Jan=2, Feb=0, Mar=2, rest 0", y.frequency.map((b) => b.episodes).join() === "2,0,2,0,0,0,0,0,0,0,0,0", y.frequency.map((b) => b.episodes).join());
+check("severity trend per bucket (Jan 6, Mar 7, empty = null)", y.frequency[0].averageSeverity === 6 && y.frequency[2].averageSeverity === 7 && y.frequency[1].averageSeverity === null);
+check("duration trend per bucket (Jan 180, Mar 60)", y.frequency[0].averageDurationMinutes === 180 && y.frequency[2].averageDurationMinutes === 60);
+check("severity distribution (4:1, 6:1, 8:2)", y.severityDistribution.length === 10 && y.severityDistribution.map((d) => d.episodes).join() === "0,0,0,1,0,1,0,2,0,0", y.severityDistribution.map((d) => d.episodes).join());
+const sy = Object.fromEntries(y.symptoms.map((x) => [x.name, x]));
+check("symptoms count distinct episodes", sy["Lip swelling"]?.episodes === 2 && sy["Hives"]?.episodes === 2 && sy["Tongue swelling"]?.episodes === 1);
+check("symptom average severity (Lip 6, Hives 4.5)", sy["Lip swelling"]?.averageSeverity === 6 && sy["Hives"]?.averageSeverity === 4.5);
+check("locations are normalised (Lip 2, Tongue 1)", y.locations.map((l) => `${l.name}:${l.episodes}`).join() === "Lip:2,Tongue:1", y.locations.map((l) => `${l.name}:${l.episodes}`).join());
+const food = y.exposures.find((x) => x.category === "Food");
+check("exposure reports: Food in 3 episodes, Stress in 1", food?.episodes === 3 && y.exposures.find((x) => x.category === "Stress")?.episodes === 1);
+check("exposure relationships are only what the user labelled (possible 2, clinician 1, suspected 0)", food?.possible === 2 && food?.clinicianConfirmed === 1 && food?.suspected === 0);
+check("exposure details are case/space-normalised (shellfish in 2)", y.exposureDetails.find((d) => d.description === "shellfish")?.episodes === 2 && y.exposureDetails.find((d) => d.description === "peanut")?.episodes === 1);
+check("gaps: 3 gaps, avg 18, median 10, shortest 4, longest 40", y.gaps.count === 3 && y.gaps.averageDays === 18 && y.gaps.medianDays === 10 && y.gaps.shortestDays === 4 && y.gaps.longestDays === 40, JSON.stringify(y.gaps).slice(0, 120));
+check("gap list is chronological [10, 40, 4]", y.gaps.recent.map((g) => g.days).join() === "10,40,4");
+
+const sub = await A(`from=${encodeURIComponent("2015-02-01T00:00:00Z")}&to=${encodeURIComponent("2015-12-31T23:59:59Z")}`);
+check("narrower range counts only C and D", sub.totals.episodes === 2 && sub.totals.averageSeverity === 7);
+check("first episode in range still gets a gap from before the range (40 and 4)", sub.gaps.count === 2 && sub.gaps.averageDays === 22, JSON.stringify(sub.gaps).slice(0, 100));
+const weeks = await A(`from=${encodeURIComponent("2015-03-01T00:00:00Z")}&to=${encodeURIComponent("2015-03-31T23:59:59Z")}`);
+check("30-day range uses week buckets starting on Monday", weeks.range.unit === "week" && weeks.frequency[0].start === "2015-02-23" && weeks.frequency.length === 6, `${weeks.range.unit} ${weeks.frequency.map((b) => b.start)}`);
+check("weekly counts [1,1,0,0,0,0]", weeks.frequency.map((b) => b.episodes).join() === "1,1,0,0,0,0", weeks.frequency.map((b) => b.episodes).join());
+const empty = await A(`from=${encodeURIComponent("2014-01-01T00:00:00Z")}&to=${encodeURIComponent("2014-12-31T23:59:59Z")}`);
+check("empty range returns zeros and nulls, not errors", empty.totals.episodes === 0 && empty.totals.averageDurationMinutes === null && empty.gaps.count === 0 && empty.symptoms.length === 0);
+check("all-time (no from) works and covers the fixtures", (await A("")).totals.episodes >= 4);
+check("from after to -> 400", (await call("GET", `/api/analytics?from=${encodeURIComponent("2016-01-01T00:00:00Z")}&to=${encodeURIComponent("2015-01-01T00:00:00Z")}`)).status === 400);
+check("garbage date -> 400", (await call("GET", "/api/analytics?from=yesterday")).status === 400);
+check("absurd range (>20 years) -> 400", (await call("GET", `/api/analytics?from=${encodeURIComponent("1900-01-01T00:00:00Z")}&to=${encodeURIComponent("2026-01-01T00:00:00Z")}`)).status === 400);
+check("analytics requires a token", (await call("GET", "/api/analytics", null, false)).status === 401);
+
+for (const f of [fA, fB, fC, fD]) await call("DELETE", `/api/episodes/${f.data.id}`);
+check("cleanup: fixtures leave analytics", (await A(Y2015)).totals.episodes === 0);
+
 console.log(failures ? `\n${failures} check(s) FAILED` : "\nAll checks passed");
 console.log(`created id for DB verification: ${id}`);
 process.exit(failures ? 1 : 0);

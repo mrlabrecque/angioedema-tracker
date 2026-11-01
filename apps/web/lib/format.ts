@@ -48,3 +48,19 @@ export const monthLabel = (ym: string) =>
   new Date(`${ym}-01T12:00:00`).toLocaleDateString(undefined, { month: "short" });
 
 export const localTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+/** Compact duration for chart labels: 45m, 2.5h, 3d. */
+export function shortDuration(mins: number): string {
+  if (mins < 60) return `${Math.round(mins)}m`;
+  const h = mins / 60;
+  if (h < 48) return `${Number(h.toFixed(1))}h`;
+  return `${Number((h / 24).toFixed(1))}d`;
+}
+
+export function bucketLabel(start: string, unit: "week" | "month" | "year", spansYears: boolean): string {
+  const d = new Date(`${start}T12:00:00`);
+  if (unit === "year") return String(d.getFullYear());
+  if (unit === "week") return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const m = d.toLocaleDateString(undefined, { month: "short" });
+  return spansYears ? `${m} ’${String(d.getFullYear()).slice(2)}` : m;
+}

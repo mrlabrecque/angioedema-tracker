@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import worker from "../src/index";
 import { signToken, verifyToken } from "../src/auth/token";
 import type { Env } from "../src/env";
+import { pickUnit } from "../src/analytics";
 import { safeTimeZone } from "../src/dashboard";
 import { createEpisodeInput, exposureInput, treatmentInput, updateEpisodeInput } from "../src/validation";
 
@@ -131,6 +132,7 @@ describe("protected routes", () => {
       ["POST", `/api/episodes/${id}/treatments`],
       ["GET", "/api/dashboard/summary"],
       ["GET", "/api/dashboard/trends"],
+      ["GET", "/api/analytics"],
       ["GET", "/api/symptoms"],
       ["GET", "/api/exposures"],
     ];
@@ -230,5 +232,16 @@ describe("dashboard helpers", () => {
     expect(safeTimeZone(null)).toBe("UTC");
     expect(safeTimeZone("Not/AZone")).toBe("UTC");
     expect(safeTimeZone("'; drop table flare_episodes; --")).toBe("UTC");
+  });
+});
+
+describe("analytics bucketing", () => {
+  const at = (days: number) => [new Date("2026-01-01T00:00:00Z"), new Date(Date.parse("2026-01-01T00:00:00Z") + days * 86_400_000)] as const;
+  it("keeps charts to a readable number of bars", () => {
+    expect(pickUnit(...at(30))).toBe("week");
+    expect(pickUnit(...at(120))).toBe("week");
+    expect(pickUnit(...at(180))).toBe("month");
+    expect(pickUnit(...at(1000))).toBe("month");
+    expect(pickUnit(...at(3000))).toBe("year");
   });
 });

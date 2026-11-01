@@ -333,3 +333,70 @@ export async function addChild(c: Ctx, id: string, kind: "symptoms" | "exposures
   const detail = await withDb(c.env, c.ec, (db) => getDetail(db, id));
   return json(c.request, c.env, detail, 201);
 }
+
+/**
+ * Edit or remove one symptom/exposure of an episode. Editing replaces the row's fields with the
+ * submitted values (the form always sends them all); the episode itself is never touched.
+ */
+export async function changeChild(
+  c: Ctx,
+  id: string,
+  kind: "symptoms" | "exposures",
+  childId: string,
+  op: "update" | "delete",
+) {
+  if (!uuid.safeParse(id).success || !uuid.safeParse(childId).success) return fail(c, 404, "not_found");
+
+  let input: Record<string, unknown> | null = null;
+  if (op === "update") {
+    const body = await readBody(c, (kind === "symptoms" ? symptomInput : exposureInput) as ZodType<Record<string, unknown>>);
+    if ("res" in body) return body.res;
+    input = body.data;
+  }
+
+  const ok = await withDb(c.env, c.ec, async (db) => {
+    const [ep] = await db
+      .select({ id: flareEpisodes.id })
+      .from(flareEpisodes)
+      .where(and(eq(flareEpisodes.id, id), isNull(flareEpisodes.deletedAt)));
+    if (!ep) return false;
+
+    if (kind === "symptoms") {
+      const where = and(eq(episodeSymptoms.id, childId), eq(episodeSymptoms.episodeId, id));
+      if (op === "delete") return (await db.delete(episodeSymptoms).where(where).returning({ id: episodeSymptoms.id })).length > 0;
+      const d = input as never as typeof symptomInput._output;
+      return (
+        (
+          await db
+            .update(episodeSymptoms)
+            .set({ symptomType: d.symptomType, bodyLocation: d.bodyLocation, severity: d.severity, notes: d.notes })
+            .where(where)
+            .returning({ id: episodeSymptoms.id })
+        ).length > 0
+      );
+    }
+
+    const where = and(eq(episodeExposures.id, childId), eq(episodeExposures.episodeId, id));
+    if (op === "delete") return (await db.delete(episodeExposures).where(where).returning({ id: episodeExposures.id })).length > 0;
+    const d = input as never as typeof exposureInput._output;
+    const canon = await resolveCategories(db, [d.exposureCategory]);
+    return (
+      (
+        await db
+          .update(episodeExposures)
+          .set({
+            exposureCategory: canon.get(d.exposureCategory) ?? d.exposureCategory,
+            exposureDescription: d.exposureDescription,
+            exposureTime: d.exposureTime ? new Date(d.exposureTime) : null,
+            suspectedRelationship: d.suspectedRelationship,
+            notes: d.notes,
+          })
+          .where(where)
+          .returning({ id: episodeExposures.id })
+      ).length > 0
+    );
+  });
+  if (!ok) return fail(c, 404, "not_found");
+  const detail = await withDb(c.env, c.ec, (db) => getDetail(db, id));
+  return json(c.request, c.env, detail);
+}

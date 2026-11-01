@@ -23,10 +23,12 @@ export default function CategoryPicker({
   placeholder: string;
 }) {
   const [custom, setCustom] = useState(false);
+  // A value that isn't in the saved list (e.g. when editing an existing custom entry) shows as custom.
+  const showCustom = custom || (value !== "" && !catalog.some((c) => c.name === value));
   return (
     <div className="space-y-3">
       <select
-        value={custom ? CUSTOM : value}
+        value={showCustom ? CUSTOM : value}
         onChange={(e) => {
           if (e.target.value === CUSTOM) {
             setCustom(true);
@@ -47,7 +49,7 @@ export default function CategoryPicker({
         ))}
         <option value={CUSTOM}>+ Add custom trigger…</option>
       </select>
-      {custom && (
+      {showCustom && (
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}

@@ -261,6 +261,55 @@ const raceName = `Zq Race ${randomUUID().slice(0, 6)}`;
 await Promise.all(Array.from({ length: 5 }, () => mk({ onsetAt: new Date().toISOString(), exposures: [{ exposureCategory: raceName }] })));
 check("five concurrent uses of a brand-new trigger create one catalog entry", (await call("GET", "/api/exposures")).data.items.filter((i) => i.name === raceName).length === 1);
 
+// ---------- Edit / remove symptoms and exposures ----------
+const eo = new Date(Date.now() - 6 * 3600_000).toISOString();
+const ed = await mk({
+  onsetAt: eo, generalNotes: "child edit fixture",
+  symptoms: [{ symptomType: "Lip swelling", bodyLocation: "Bottom lip", severity: 5 }, { symptomType: "Hives", severity: 2 }],
+  exposures: [{ exposureCategory: "Food", exposureDescription: "oats", exposureTime: eo }, { exposureCategory: "Stress" }],
+});
+const edId = ed.data.id;
+const [s1, s2] = ed.data.symptoms;
+const [x1, x2] = ed.data.exposures;
+const other = await mk({ onsetAt: eo, symptoms: [{ symptomType: "Pain", severity: 1 }], exposures: [{ exposureCategory: "Food" }] });
+
+const up1 = await call("PUT", `/api/episodes/${edId}/symptoms/${s1.id}`, { symptomType: "Lip swelling", bodyLocation: "Upper left lip", severity: 8, notes: "corrected" });
+const gs1 = up1.data.symptoms.find((x) => x.id === s1.id);
+check("edit symptom: severity, location and notes change", up1.status === 200 && gs1.severity === 8 && gs1.bodyLocation === "Upper left lip" && gs1.notes === "corrected");
+check("edit symptom: sibling symptom untouched", up1.data.symptoms.find((x) => x.id === s2.id).severity === 2);
+check("edit symptom: episode fields untouched", up1.data.generalNotes === "child edit fixture" && up1.data.status === "active" && up1.data.onsetAt === ed.data.onsetAt);
+check("edit symptom can clear optional fields", (await call("PUT", `/api/episodes/${edId}/symptoms/${s1.id}`, { symptomType: "Lip swelling", severity: 8 })).data.symptoms.find((x) => x.id === s1.id).bodyLocation === null);
+check("edit symptom persists on re-read", (await call("GET", `/api/episodes/${edId}`)).data.symptoms.find((x) => x.id === s1.id).severity === 8);
+check("edit symptom rejects severity 11", (await call("PUT", `/api/episodes/${edId}/symptoms/${s1.id}`, { symptomType: "Hives", severity: 11 })).status === 400);
+check("edit symptom rejects an empty body", (await call("PUT", `/api/episodes/${edId}/symptoms/${s1.id}`, {})).status === 400);
+check("cannot edit another episode's symptom through this episode", (await call("PUT", `/api/episodes/${edId}/symptoms/${other.data.symptoms[0].id}`, { symptomType: "Hives", severity: 9 })).status === 404);
+check("the other episode's symptom is unchanged", (await call("GET", `/api/episodes/${other.data.id}`)).data.symptoms[0].severity === 1);
+check("unknown symptom id -> 404", (await call("PUT", `/api/episodes/${edId}/symptoms/${randomUUID()}`, { symptomType: "Hives", severity: 3 })).status === 404);
+
+const newCat = `Zq Edit ${randomUUID().slice(0, 6)}`;
+const ux1 = await call("PUT", `/api/episodes/${edId}/exposures/${x1.id}`, { exposureCategory: newCat, exposureDescription: "changed", suspectedRelationship: "possible", exposureTime: null, notes: "n" });
+const gx1 = ux1.data.exposures.find((x) => x.id === x1.id);
+check("edit exposure: category, description, relationship, time cleared, notes", ux1.status === 200 && gx1.exposureCategory === newCat && gx1.exposureDescription === "changed" && gx1.suspectedRelationship === "possible" && gx1.exposureTime === null && gx1.notes === "n");
+check("edit exposure with a new custom category adds it to the catalog", (await call("GET", "/api/exposures")).data.items.some((i) => i.name === newCat));
+check("edit exposure canonicalises case (food -> Food)", (await call("PUT", `/api/episodes/${edId}/exposures/${x2.id}`, { exposureCategory: "food" })).data.exposures.find((x) => x.id === x2.id).exposureCategory === "Food");
+const t2 = new Date(Date.now() - 5 * 3600_000).toISOString();
+check("edit exposure can set a time", Date.parse((await call("PUT", `/api/episodes/${edId}/exposures/${x2.id}`, { exposureCategory: "Food", exposureTime: t2 })).data.exposures.find((x) => x.id === x2.id).exposureTime) === Date.parse(t2));
+check("edit exposure rejects a bad relationship", (await call("PUT", `/api/episodes/${edId}/exposures/${x2.id}`, { exposureCategory: "Food", suspectedRelationship: "proven" })).status === 400);
+check("cannot edit another episode's exposure through this episode", (await call("PUT", `/api/episodes/${edId}/exposures/${other.data.exposures[0].id}`, { exposureCategory: "Stress" })).status === 404);
+check("treatments have no item route", (await call("PUT", `/api/episodes/${edId}/treatments/${randomUUID()}`, {})).status === 404);
+
+const del1 = await call("DELETE", `/api/episodes/${edId}/symptoms/${s2.id}`);
+check("remove symptom", del1.status === 200 && del1.data.symptoms.length === 1 && del1.data.symptoms[0].id === s1.id);
+check("remove symptom: second delete -> 404", (await call("DELETE", `/api/episodes/${edId}/symptoms/${s2.id}`)).status === 404);
+const del2 = await call("DELETE", `/api/episodes/${edId}/exposures/${x1.id}`);
+check("remove exposure", del2.status === 200 && del2.data.exposures.length === 1 && del2.data.exposures[0].id === x2.id);
+check("cannot remove another episode's exposure through this episode", (await call("DELETE", `/api/episodes/${edId}/exposures/${other.data.exposures[0].id}`)).status === 404);
+check("the other episode kept its exposure", (await call("GET", `/api/episodes/${other.data.id}`)).data.exposures.length === 1);
+check("removing every symptom is allowed (episode stays)", (await call("DELETE", `/api/episodes/${edId}/symptoms/${s1.id}`)).data.symptoms.length === 0);
+await call("DELETE", `/api/episodes/${edId}`);
+check("child edit on a deleted episode -> 404", (await call("PUT", `/api/episodes/${edId}/symptoms/${s1.id}`, { symptomType: "Hives", severity: 3 })).status === 404);
+check("child delete on a deleted episode -> 404", (await call("DELETE", `/api/episodes/${edId}/exposures/${x2.id}`)).status === 404);
+
 console.log(failures ? `\n${failures} check(s) FAILED` : "\nAll checks passed");
 console.log(`created id for DB verification: ${id}`);
 process.exit(failures ? 1 : 0);

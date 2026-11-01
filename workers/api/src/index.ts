@@ -7,6 +7,7 @@ import { analytics } from "./analytics";
 import { summary, trends } from "./dashboard";
 import {
   addChild,
+  changeChild,
   createEpisode,
   deleteEpisode,
   getEpisode,
@@ -97,7 +98,7 @@ async function route(request: Request, env: Env, ec: ExecutionContext): Promise<
   }
 
   // Everything below requires a valid, unrevoked token.
-  const episodeMatch = /^\/api\/episodes\/([^/]+)(?:\/(symptoms|exposures|treatments))?$/.exec(path);
+  const episodeMatch = /^\/api\/episodes\/([^/]+)(?:\/(symptoms|exposures|treatments)(?:\/([^/]+))?)?$/.exec(path);
   const isKnown =
     path === "/api/auth/logout" ||
     path === "/api/system/db-check" ||
@@ -134,7 +135,12 @@ async function route(request: Request, env: Env, ec: ExecutionContext): Promise<
   if (episodeMatch) {
     const id = episodeMatch[1]!;
     const child = episodeMatch[2] as "symptoms" | "exposures" | "treatments" | undefined;
-    if (!child) {
+    const childId = episodeMatch[3];
+    if (child && childId) {
+      if (child === "treatments") return json(request, env, { error: "not_found" }, 404);
+      if (m === "PUT") return changeChild(c, id, child, childId, "update");
+      if (m === "DELETE") return changeChild(c, id, child, childId, "delete");
+    } else if (!child) {
       if (m === "GET") return getEpisode(c, id);
       if (m === "PUT") return updateEpisode(c, id);
       if (m === "DELETE") return deleteEpisode(c, id);

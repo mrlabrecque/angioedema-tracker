@@ -15,7 +15,7 @@ import {
   fromLocalInput,
   toLocalInput,
 } from "@/lib/format";
-import type { CatalogItem, EpisodeDetail, Relationship, Response, Status } from "@/lib/types";
+import type { CatalogItem, EpisodeDetail, Exposure, Relationship, Response, Status, Symptom } from "@/lib/types";
 
 type Panel = null | "edit" | "symptom" | "exposure" | "treatment";
 
@@ -28,6 +28,7 @@ export default function EpisodeView() {
   const [ep, setEp] = useState<EpisodeDetail | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "missing" | "error">("loading");
   const [panel, setPanel] = useState<Panel>(null);
+  const [editing, setEditing] = useState<string | null>(null); // id of the symptom/exposure being edited
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [symptomCatalog, setSymptomCatalog] = useState<CatalogItem[]>([]);
@@ -56,14 +57,20 @@ export default function EpisodeView() {
     api<{ items: CatalogItem[] }>("/api/exposures", { token }).then((r) => setExposureCatalog(r.items)).catch(() => {});
   }, [token]);
 
+  const refreshExposureCatalog = useCallback(() => {
+    if (!token) return;
+    api<{ items: CatalogItem[] }>("/api/exposures", { token }).then((r) => setExposureCatalog(r.items)).catch(() => {});
+  }, [token]);
+
   /** Runs a write; the screen only changes once the server confirms it saved. */
   async function write(path: string, method: string, body: unknown, okMsg: string) {
     if (!token || busy) return false;
     setBusy(true);
     setMessage(null);
     try {
-      setEp(await api<EpisodeDetail>(path, { method, body: JSON.stringify(body), token }));
+      setEp(await api<EpisodeDetail>(path, { method, body: body === undefined ? undefined : JSON.stringify(body), token }));
       setPanel(null);
+      setEditing(null);
       setMessage(okMsg);
       return true;
     } catch (e) {
@@ -144,17 +151,36 @@ export default function EpisodeView() {
 
       <Card title="Symptoms" action={<AddButton onClick={() => setPanel(panel === "symptom" ? null : "symptom")} />}>
         {ep.symptoms.length === 0 && <p className="text-sm text-muted">None recorded.</p>}
-        <ul className="space-y-2">
-          {ep.symptoms.map((s) => (
-            <li key={s.id} className="flex justify-between gap-3">
-              <span>
-                {s.symptomType}
-                {s.bodyLocation && <span className="text-muted"> · {s.bodyLocation}</span>}
-                {s.notes && <span className="block text-sm text-muted">{s.notes}</span>}
-              </span>
-              <span className="text-sm text-muted">{s.severity}/10</span>
-            </li>
-          ))}
+        <ul className="space-y-3">
+          {ep.symptoms.map((s) =>
+            editing === s.id ? (
+              <li key={s.id}>
+                <SymptomForm
+                  initial={s}
+                  catalog={symptomCatalog}
+                  busy={busy}
+                  submitLabel="Save changes"
+                  onSave={(b) => write(`${sub}/symptoms/${s.id}`, "PUT", b, "Symptom updated.")}
+                  onCancel={() => setEditing(null)}
+                  onDelete={() => {
+                    if (window.confirm("Remove this symptom from the episode?")) void write(`${sub}/symptoms/${s.id}`, "DELETE", undefined, "Symptom removed.");
+                  }}
+                />
+              </li>
+            ) : (
+              <li key={s.id} className="flex items-start justify-between gap-3">
+                <span>
+                  {s.symptomType}
+                  {s.bodyLocation && <span className="text-muted"> · {s.bodyLocation}</span>}
+                  {s.notes && <span className="block text-sm text-muted">{s.notes}</span>}
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="text-sm text-muted">{s.severity}/10</span>
+                  <EditButton onClick={() => setEditing(s.id)} />
+                </span>
+              </li>
+            ),
+          )}
         </ul>
         {panel === "symptom" && (
           <SymptomForm catalog={symptomCatalog} busy={busy} onSave={(b) => write(`${sub}/symptoms`, "POST", b, "Symptom added.")} />
@@ -163,23 +189,42 @@ export default function EpisodeView() {
 
       <Card title="Possible exposures" action={<AddButton onClick={() => setPanel(panel === "exposure" ? null : "exposure")} />}>
         {ep.exposures.length === 0 && <p className="text-sm text-muted">None noted.</p>}
-        <ul className="space-y-2">
-          {ep.exposures.map((x) => (
-            <li key={x.id} className="flex justify-between gap-3">
-              <span>
-                {x.exposureCategory}
-                {x.exposureDescription && <span className="text-muted"> · {x.exposureDescription}</span>}
-              </span>
-              <span className="text-sm text-muted">{RELATIONSHIP_LABEL[x.suspectedRelationship]}</span>
-            </li>
-          ))}
+        <ul className="space-y-3">
+          {ep.exposures.map((x) =>
+            editing === x.id ? (
+              <li key={x.id}>
+                <ExposureForm
+                  initial={x}
+                  catalog={exposureCatalog}
+                  busy={busy}
+                  submitLabel="Save changes"
+                  onSave={async (b) => {
+                    if (await write(`${sub}/exposures/${x.id}`, "PUT", b, "Exposure updated.") && token) refreshExposureCatalog();
+                  }}
+                  onCancel={() => setEditing(null)}
+                  onDelete={() => {
+                    if (window.confirm("Remove this exposure from the episode?")) void write(`${sub}/exposures/${x.id}`, "DELETE", undefined, "Exposure removed.");
+                  }}
+                />
+              </li>
+            ) : (
+              <li key={x.id} className="flex items-start justify-between gap-3">
+                <span>
+                  {x.exposureCategory}
+                  {x.exposureDescription && <span className="text-muted"> · {x.exposureDescription}</span>}
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="text-sm text-muted">{RELATIONSHIP_LABEL[x.suspectedRelationship]}</span>
+                  <EditButton onClick={() => setEditing(x.id)} />
+                </span>
+              </li>
+            ),
+          )}
         </ul>
         <p className="mt-3 text-xs text-muted">Things you noted around this episode. They are not confirmed causes.</p>
         {panel === "exposure" && (
           <ExposureForm catalog={exposureCatalog} busy={busy} onSave={async (b) => {
-              if (await write(`${sub}/exposures`, "POST", b, "Exposure added.") && token) {
-                api<{ items: CatalogItem[] }>("/api/exposures", { token }).then((r) => setExposureCatalog(r.items)).catch(() => {});
-              }
+              if (await write(`${sub}/exposures`, "POST", b, "Exposure added.")) refreshExposureCatalog();
             }} />
         )}
       </Card>
@@ -219,6 +264,14 @@ export default function EpisodeView() {
         Remove episode
       </button>
     </main>
+  );
+}
+
+function EditButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="min-h-11 px-2 text-sm font-medium text-accent">
+      Edit
+    </button>
   );
 }
 
@@ -282,43 +335,86 @@ function EditForm({ ep, busy, onSave }: { ep: EpisodeDetail; busy: boolean; onSa
   );
 }
 
-function SymptomForm({ catalog, busy, onSave }: { catalog: CatalogItem[]; busy: boolean; onSave: (b: object) => void }) {
-  const [type, setType] = useState("");
-  const [loc, setLoc] = useState("");
-  const [sev, setSev] = useState<number | null>(null);
+interface FormProps<T, B> {
+  initial?: T;
+  catalog: CatalogItem[];
+  busy: boolean;
+  submitLabel?: string;
+  onSave: (b: B) => void;
+  onCancel?: () => void;
+  onDelete?: () => void;
+}
+
+function EditActions({ onCancel, onDelete }: { onCancel?: () => void; onDelete?: () => void }) {
+  if (!onCancel && !onDelete) return null;
+  return (
+    <div className="flex gap-3">
+      {onCancel && (
+        <button type="button" onClick={onCancel} className={`${btnSecondary} flex-1`}>
+          Cancel
+        </button>
+      )}
+      {onDelete && (
+        <button type="button" onClick={onDelete} className={`${btnSecondary} flex-1 text-danger`}>
+          Remove
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SymptomForm({ initial, catalog, busy, submitLabel = "Add symptom", onSave, onCancel, onDelete }: FormProps<Symptom, object>) {
+  const [type, setType] = useState(initial?.symptomType ?? "");
+  const [loc, setLoc] = useState(initial?.bodyLocation ?? "");
+  const [sev, setSev] = useState<number | null>(initial?.severity ?? null);
+  const [notes, setNotes] = useState(initial?.notes ?? "");
+  const names = catalog.map((c) => c.name);
+  if (type && !names.includes(type)) names.push(type);
   return (
     <form
-      className="mt-4 space-y-3 border-t border-line pt-4"
+      className={initial ? "space-y-3 rounded-xl border border-line p-3" : "mt-4 space-y-3 border-t border-line pt-4"}
       onSubmit={(e) => {
         e.preventDefault();
-        if (type && sev) onSave({ symptomType: type, bodyLocation: loc || null, severity: sev });
+        if (type && sev) onSave({ symptomType: type, bodyLocation: loc.trim() || null, severity: sev, notes: notes.trim() || null });
       }}
     >
       <select value={type} onChange={(e) => setType(e.target.value)} className={inputCls} aria-label="Symptom" required>
         <option value="">Choose symptom…</option>
-        {catalog.map((c) => (
-          <option key={c.id}>{c.name}</option>
+        {names.map((n) => (
+          <option key={n}>{n}</option>
         ))}
       </select>
       <input value={loc} onChange={(e) => setLoc(e.target.value)} placeholder="Body location (optional)" maxLength={80} className={inputCls} />
       <SeverityPicker value={sev} onChange={setSev} />
+      <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes (optional)" maxLength={2000} className={inputCls} />
       <button type="submit" disabled={busy || !type || !sev} className={`${btnPrimary} w-full`}>
-        Add symptom
+        {submitLabel}
       </button>
+      <EditActions onCancel={onCancel} onDelete={onDelete} />
     </form>
   );
 }
 
-function ExposureForm({ catalog, busy, onSave }: { catalog: CatalogItem[]; busy: boolean; onSave: (b: object) => void }) {
-  const [cat, setCat] = useState("");
-  const [desc, setDesc] = useState("");
-  const [rel, setRel] = useState<Relationship>("unknown");
+function ExposureForm({ initial, catalog, busy, submitLabel = "Add exposure", onSave, onCancel, onDelete }: FormProps<Exposure, object>) {
+  const [cat, setCat] = useState(initial?.exposureCategory ?? "");
+  const [desc, setDesc] = useState(initial?.exposureDescription ?? "");
+  const [rel, setRel] = useState<Relationship>(initial?.suspectedRelationship ?? "unknown");
+  const [time, setTime] = useState(initial?.exposureTime ? toLocalInput(new Date(initial.exposureTime)) : "");
+  const [notes, setNotes] = useState(initial?.notes ?? "");
   return (
     <form
-      className="mt-4 space-y-3 border-t border-line pt-4"
+      className={initial ? "space-y-3 rounded-xl border border-line p-3" : "mt-4 space-y-3 border-t border-line pt-4"}
       onSubmit={(e) => {
         e.preventDefault();
-        if (cat.trim()) onSave({ exposureCategory: cat.trim(), exposureDescription: desc || null, suspectedRelationship: rel });
+        if (!cat.trim()) return;
+        onSave({
+          exposureCategory: cat.trim(),
+          exposureDescription: desc.trim() || null,
+          // Editing keeps (or clears) the recorded time; adding leaves it blank.
+          exposureTime: initial ? (time ? fromLocalInput(time) : null) : undefined,
+          suspectedRelationship: rel,
+          notes: notes.trim() || null,
+        });
       }}
     >
       <CategoryPicker catalog={catalog} value={cat} onChange={setCat} placeholder="Choose category…" />
@@ -329,9 +425,19 @@ function ExposureForm({ catalog, busy, onSave }: { catalog: CatalogItem[]; busy:
         <option value="suspected">Suspected</option>
         <option value="confirmed_by_clinician">Confirmed by my clinician</option>
       </select>
+      {initial && (
+        <>
+          <label className="block text-xs text-muted">
+            When (optional)
+            <input type="datetime-local" value={time} onChange={(e) => setTime(e.target.value)} className={`${inputCls} mt-1`} />
+          </label>
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes (optional)" maxLength={2000} className={inputCls} />
+        </>
+      )}
       <button type="submit" disabled={busy || !cat.trim()} className={`${btnPrimary} w-full`}>
-        Add exposure
+        {submitLabel}
       </button>
+      <EditActions onCancel={onCancel} onDelete={onDelete} />
     </form>
   );
 }

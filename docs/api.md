@@ -16,6 +16,8 @@ All routes except `/api/health` and `/api/auth/login` need `Authorization: Beare
 | GET | `/api/analytics?from=&to=&tz=` | descriptive statistics for a date range (omit `from` for all time): totals and duration/severity stats, frequency per week/month/year (bucket size chosen from the range), severity distribution, symptom and swelling-location counts, reported-exposure counts, and time between episodes. Ranges over 20 years or with `from` after `to` return 400 |
 | POST | `/api/episodes/:id/symptoms`, `/exposures`, `/treatments` | add to an existing episode; returns the full detail |
 
+Custom triggers: an `exposureCategory` that isn't in the list is saved as a new category automatically (matched case-insensitively, so "grass cutting" reuses "Grass cutting"), and then appears in `GET /api/exposures` for next time. Names are limited to 80 characters.
+
 Exposures default to `suspectedRelationship: "unknown"`; nothing is ever set to `confirmed_by_clinician` automatically.
 
 ## End-to-end test

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import CategoryPicker from "@/components/CategoryPicker";
 import { Card, Chip, Field, SeverityPicker, StatusBadge, btnPrimary, btnSecondary, inputCls } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -175,7 +176,11 @@ export default function EpisodeView() {
         </ul>
         <p className="mt-3 text-xs text-muted">Things you noted around this episode. They are not confirmed causes.</p>
         {panel === "exposure" && (
-          <ExposureForm catalog={exposureCatalog} busy={busy} onSave={(b) => write(`${sub}/exposures`, "POST", b, "Exposure added.")} />
+          <ExposureForm catalog={exposureCatalog} busy={busy} onSave={async (b) => {
+              if (await write(`${sub}/exposures`, "POST", b, "Exposure added.") && token) {
+                api<{ items: CatalogItem[] }>("/api/exposures", { token }).then((r) => setExposureCatalog(r.items)).catch(() => {});
+              }
+            }} />
         )}
       </Card>
 
@@ -313,15 +318,10 @@ function ExposureForm({ catalog, busy, onSave }: { catalog: CatalogItem[]; busy:
       className="mt-4 space-y-3 border-t border-line pt-4"
       onSubmit={(e) => {
         e.preventDefault();
-        if (cat) onSave({ exposureCategory: cat, exposureDescription: desc || null, suspectedRelationship: rel });
+        if (cat.trim()) onSave({ exposureCategory: cat.trim(), exposureDescription: desc || null, suspectedRelationship: rel });
       }}
     >
-      <select value={cat} onChange={(e) => setCat(e.target.value)} className={inputCls} aria-label="Exposure category" required>
-        <option value="">Choose category…</option>
-        {catalog.map((c) => (
-          <option key={c.id}>{c.name}</option>
-        ))}
-      </select>
+      <CategoryPicker catalog={catalog} value={cat} onChange={setCat} placeholder="Choose category…" />
       <input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="What was it? (optional)" maxLength={500} className={inputCls} />
       <select value={rel} onChange={(e) => setRel(e.target.value as Relationship)} className={inputCls} aria-label="How likely a factor">
         <option value="unknown">Unknown if related</option>
@@ -329,7 +329,7 @@ function ExposureForm({ catalog, busy, onSave }: { catalog: CatalogItem[]; busy:
         <option value="suspected">Suspected</option>
         <option value="confirmed_by_clinician">Confirmed by my clinician</option>
       </select>
-      <button type="submit" disabled={busy || !cat} className={`${btnPrimary} w-full`}>
+      <button type="submit" disabled={busy || !cat.trim()} className={`${btnPrimary} w-full`}>
         Add exposure
       </button>
     </form>

@@ -32,7 +32,7 @@ check("unauthenticated request rejected", (await call("GET", "/api/episodes", nu
 const sym = await call("GET", "/api/symptoms");
 const exp = await call("GET", "/api/exposures");
 check("symptom catalog seeded (13)", sym.data.items?.length === 13, JSON.stringify(sym.data).slice(0, 80));
-check("exposure catalog seeded (15)", exp.data.items?.length === 15);
+check("exposure catalog has the 15 standard categories (custom ones may add more)", exp.data.items?.length >= 15 && exp.data.items.some((i) => i.name === "Food"));
 
 const onset = new Date(Date.now() - 3 * 3600_000).toISOString();
 const reqId = randomUUID();
@@ -237,6 +237,29 @@ check("analytics requires a token", (await call("GET", "/api/analytics", null, f
 
 for (const f of [fA, fB, fC, fD]) await call("DELETE", `/api/episodes/${f.data.id}`);
 check("cleanup: fixtures leave analytics", (await A(Y2015)).totals.episodes === 0);
+
+// ---------- Custom triggers ----------
+const custom = `Zq Trigger ${randomUUID().slice(0, 6)}`;
+const catBefore = (await call("GET", "/api/exposures")).data.items.length;
+const c1 = await mk({ onsetAt: new Date(Date.now() - 2 * 3600_000).toISOString(), exposures: [{ exposureCategory: `  ${custom}  `, exposureDescription: "first use" }] });
+check("custom trigger is accepted and stored trimmed", c1.status === 201 && c1.data.exposures[0].exposureCategory === custom, JSON.stringify(c1.data.exposures?.[0]));
+const catAfter = (await call("GET", "/api/exposures")).data.items;
+check("custom trigger is added to the catalog exactly once", catAfter.length === catBefore + 1 && catAfter.filter((i) => i.name === custom).length === 1);
+check("custom trigger is listed after the standard ones", catAfter.findIndex((i) => i.name === custom) >= 15);
+const c2 = await mk({ onsetAt: new Date(Date.now() - 3600_000).toISOString(), exposures: [{ exposureCategory: custom.toUpperCase() }] });
+check("same trigger in different case reuses the saved name", c2.data.exposures[0].exposureCategory === custom, c2.data.exposures?.[0]?.exposureCategory);
+const c3 = await mk({ onsetAt: new Date().toISOString() });
+const c3add = await call("POST", `/api/episodes/${c3.data.id}/exposures`, { exposureCategory: custom.toLowerCase() });
+check("adding a custom trigger to an existing episode reuses the saved name", c3add.status === 201 && c3add.data.exposures[0].exposureCategory === custom);
+check("a standard category in a different case maps to the standard name", (await mk({ onsetAt: new Date().toISOString(), exposures: [{ exposureCategory: "food" }] })).data.exposures[0].exposureCategory === "Food");
+check("catalog size unchanged by reuse", (await call("GET", "/api/exposures")).data.items.length === catBefore + 1);
+check("blank trigger is rejected", (await mk({ onsetAt: new Date().toISOString(), exposures: [{ exposureCategory: "   " }] })).status === 400);
+check("over-long trigger name is rejected", (await mk({ onsetAt: new Date().toISOString(), exposures: [{ exposureCategory: "x".repeat(81) }] })).status === 400);
+const an = (await call("GET", `/api/analytics?tz=UTC&from=${encodeURIComponent(new Date(Date.now() - 86400_000).toISOString())}`)).data;
+check("analytics groups the custom trigger under one name (3 episodes)", an.exposures.find((x) => x.category === custom)?.episodes === 3, JSON.stringify(an.exposures.map((x) => [x.category, x.episodes])).slice(0, 140));
+const raceName = `Zq Race ${randomUUID().slice(0, 6)}`;
+await Promise.all(Array.from({ length: 5 }, () => mk({ onsetAt: new Date().toISOString(), exposures: [{ exposureCategory: raceName }] })));
+check("five concurrent uses of a brand-new trigger create one catalog entry", (await call("GET", "/api/exposures")).data.items.filter((i) => i.name === raceName).length === 1);
 
 console.log(failures ? `\n${failures} check(s) FAILED` : "\nAll checks passed");
 console.log(`created id for DB verification: ${id}`);

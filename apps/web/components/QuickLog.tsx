@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import CategoryPicker from "@/components/CategoryPicker";
 import { Card, Chip, Field, SeverityPicker, btnPrimary, inputCls } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -78,7 +79,7 @@ export default function QuickLog() {
         bodyLocation: isSwelling(name) ? locationOf(name) : null,
         severity: severity ?? 1,
       })),
-      exposures: expCategory ? [{ exposureCategory: expCategory, exposureDescription: expDesc || null }] : [],
+      exposures: expCategory.trim() ? [{ exposureCategory: expCategory.trim(), exposureDescription: expDesc || null }] : [],
       treatments: medName.trim()
         ? [{ medicationName: medName.trim(), dosage: medDose || null, administrationTime: fromLocalInput(medTime), response: medResponse }]
         : [],
@@ -159,15 +160,8 @@ export default function QuickLog() {
 
         <Card title="Possible exposure (optional)">
           <div className="space-y-3">
-            <select value={expCategory} onChange={(e) => setExpCategory(e.target.value)} className={inputCls} aria-label="Exposure category">
-              <option value="">None noted</option>
-              {exposureCatalog.map((x) => (
-                <option key={x.id} value={x.name}>
-                  {x.name}
-                </option>
-              ))}
-            </select>
-            {expCategory && (
+            <CategoryPicker catalog={exposureCatalog} value={expCategory} onChange={setExpCategory} placeholder="None noted" />
+            {expCategory.trim() && (
               <input value={expDesc} onChange={(e) => setExpDesc(e.target.value)} placeholder="What was it?" maxLength={500} className={inputCls} />
             )}
             <p className="text-xs text-muted">Recorded as “unknown” until you change it. Nothing here is treated as a confirmed cause.</p>

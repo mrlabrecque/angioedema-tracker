@@ -48,6 +48,40 @@ async function readBody<T>(c: Ctx, schema: ZodType<T>): Promise<{ data: T } | { 
   return { data: r.data };
 }
 
+
+type Writer = Pick<Db, "select" | "insert">;
+
+/**
+ * Maps each exposure category to its canonical catalog name, adding custom ones.
+ * "grass cutting" and "Grass Cutting" resolve to one entry, so lists and analytics stay clean.
+ */
+async function resolveCategories(db: Writer, names: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const raw of names) {
+    const name = raw.trim();
+    if (!name || out.has(raw)) continue;
+    const find = () =>
+      db
+        .select({ name: exposureCatalog.name })
+        .from(exposureCatalog)
+        .where(sql`lower(${exposureCatalog.name}) = lower(${name})`)
+        .limit(1);
+    let [hit] = await find();
+    if (!hit) {
+      await db
+        .insert(exposureCatalog)
+        .values({
+          name,
+          sortOrder: sql`(select coalesce(max(sort_order), 0) + 1 from exposure_catalog)` as unknown as number,
+        })
+        .onConflictDoNothing();
+      [hit] = await find();
+    }
+    out.set(raw, hit?.name ?? name);
+  }
+  return out;
+}
+
 async function getDetail(db: Db, id: string) {
   const [episode] = await db
     .select()
@@ -176,9 +210,11 @@ export async function createEpisode(c: Ctx) {
       const episodeId = row.id;
       if (d.symptoms.length) await tx.insert(episodeSymptoms).values(d.symptoms.map((s) => ({ ...s, episodeId })));
       if (d.exposures.length) {
+        const canon = await resolveCategories(tx, d.exposures.map((e) => e.exposureCategory));
         await tx.insert(episodeExposures).values(
           d.exposures.map((e) => ({
             ...e,
+            exposureCategory: canon.get(e.exposureCategory) ?? e.exposureCategory,
             episodeId,
             exposureTime: e.exposureTime ? new Date(e.exposureTime) : null,
           })),
@@ -278,9 +314,13 @@ export async function addChild(c: Ctx, id: string, kind: "symptoms" | "exposures
       await db.insert(episodeSymptoms).values({ ...(d as never as typeof symptomInput._output), episodeId: id });
     } else if (kind === "exposures") {
       const e = d as never as typeof exposureInput._output;
-      await db
-        .insert(episodeExposures)
-        .values({ ...e, episodeId: id, exposureTime: e.exposureTime ? new Date(e.exposureTime) : null });
+      const canon = await resolveCategories(db, [e.exposureCategory]);
+      await db.insert(episodeExposures).values({
+        ...e,
+        exposureCategory: canon.get(e.exposureCategory) ?? e.exposureCategory,
+        episodeId: id,
+        exposureTime: e.exposureTime ? new Date(e.exposureTime) : null,
+      });
     } else {
       const t = d as never as typeof treatmentInput._output;
       await db

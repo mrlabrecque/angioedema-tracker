@@ -114,6 +114,68 @@ check("deleted episode hidden from get", (await call("GET", `/api/episodes/${id}
 check("deleted episode hidden from list", !(await call("GET", "/api/episodes")).data.items.some((e) => e.id === id));
 check("second delete -> 404", (await call("DELETE", `/api/episodes/${id}`)).status === 404);
 
+// ---------- Phase 3: dashboard, search, filters (deltas, so existing data is fine) ----------
+const sumBefore = (await call("GET", "/api/dashboard/summary")).data;
+const tag = `zq${randomUUID().slice(0, 8)}`;
+const DAY = 86400_000;
+const mk = (extra) => call("POST", "/api/episodes", { clientRequestId: randomUUID(), ...extra });
+
+const e60 = await mk({ onsetAt: new Date(Date.now() - 5 * 3600_000).toISOString(), resolutionAt: new Date(Date.now() - 4 * 3600_000).toISOString(), generalNotes: `${tag} sixty`, symptoms: [{ symptomType: "Hives", severity: 3 }], exposures: [{ exposureCategory: "Food", exposureDescription: `${tag}-peanut` }] });
+const e120 = await mk({ onsetAt: new Date(Date.now() - 9 * 3600_000).toISOString(), resolutionAt: new Date(Date.now() - 7 * 3600_000).toISOString(), generalNotes: `${tag} onetwenty`, symptoms: [{ symptomType: "Hives", severity: 4 }, { symptomType: "Itching", severity: 2 }] });
+const eActive = await mk({ onsetAt: new Date(Date.now() - 3600_000).toISOString(), generalNotes: `${tag} active 100% sure`, treatments: [{ medicationName: `${tag}-med`, administrationTime: new Date().toISOString() }] });
+const eOld = await mk({ onsetAt: new Date(Date.now() - 40 * DAY).toISOString(), resolutionAt: new Date(Date.now() - 40 * DAY + 3600_000).toISOString(), generalNotes: `${tag} old` });
+check("created 4 dashboard fixtures", [e60, e120, eActive, eOld].every((r) => r.status === 201));
+
+const sumAfter = (await call("GET", "/api/dashboard/summary")).data;
+check("summary total increased by exactly 4", sumAfter.total - sumBefore.total === 4, `${sumBefore.total}->${sumAfter.total}`);
+check("summary active increased by exactly 1", sumAfter.active - sumBefore.active === 1);
+check("summary last30Days increased by exactly 3 (old one excluded)", sumAfter.last30Days - sumBefore.last30Days === 3, `${sumBefore.last30Days}->${sumAfter.last30Days}`);
+check("summary most recent is the newest episode", sumAfter.mostRecent?.id === eActive.data.id);
+if (sumBefore.episodesWithDuration === 0) {
+  // durations 60, 120, 60 min => average 80
+  check("average duration computed from real records (80 min)", sumAfter.averageDurationMinutes === 80, String(sumAfter.averageDurationMinutes));
+} else {
+  check("average duration present", typeof sumAfter.averageDurationMinutes === "number");
+}
+
+const tr = (await call("GET", "/api/dashboard/trends?months=6&tz=America/New_York")).data;
+check("trends: 6 month buckets ending this month", tr.episodesByMonth?.length === 6 && /^\d{4}-\d{2}$/.test(tr.episodesByMonth[5].month));
+check("trends: this month counts today's episodes", tr.episodesByMonth[5].episodes >= 3);
+check("trends: symptom frequency counts distinct episodes (Hives >= 2)", (tr.symptomFrequency.find((s) => s.name === "Hives")?.episodes ?? 0) >= 2);
+check("trends: exposure reports list Food", tr.exposureReports.some((x) => x.category === "Food" && x.episodes >= 1));
+check("trends: nothing is auto-confirmed", tr.exposureReports.find((x) => x.category === "Food")?.clinicianConfirmed === 0);
+check("trends: bad tz falls back to UTC", (await call("GET", "/api/dashboard/trends?tz=%27%3B%20drop%20table")).data.timeZone === "UTC");
+check("trends: months is clamped", (await call("GET", "/api/dashboard/trends?months=999")).data.episodesByMonth.length === 24);
+
+const search = async (qs) => (await call("GET", `/api/episodes?${qs}`)).data;
+check("search by notes token finds all 4", (await search(`q=${tag}`)).items.length === 4);
+check("search by exposure description", (await search(`q=${tag}-peanut`)).items.map((i) => i.id).join() === e60.data.id);
+check("search by medication name", (await search(`q=${tag}-med`)).items.map((i) => i.id).join() === eActive.data.id);
+check("search by symptom + token", (await search(`q=${tag}`)).items.every((i) => i.symptoms !== undefined));
+check("search is case-insensitive", (await search(`q=${tag.toUpperCase()}`)).items.length === 4);
+const pctLiteral = await search(`q=${encodeURIComponent(`${tag} active 100%`)}`);
+check("search matches a literal '%' in text", pctLiteral.items.map((i) => i.id).join() === eActive.data.id, `${pctLiteral.items.length} items`);
+const pctOnly = await search("q=%25&limit=200");
+const everything = await search("limit=200");
+check("a lone '%' is not a wildcard (fewer results than no filter)", pctOnly.items.length >= 1 && pctOnly.items.length < everything.items.length, `${pctOnly.items.length} vs ${everything.items.length}`);
+check("search with no match is empty", (await search(`q=${tag}nomatch`)).items.length === 0);
+check("filter status=active + token", (await search(`q=${tag}&status=active`)).items.map((i) => i.id).join() === eActive.data.id);
+check("filter status=resolved + token", (await search(`q=${tag}&status=resolved`)).items.length === 3);
+const win = (a, b) => `from=${encodeURIComponent(new Date(Date.now() - a * DAY).toISOString())}&to=${encodeURIComponent(new Date(Date.now() - b * DAY).toISOString())}`;
+check("date range 50d..30d ago returns only the old episode", (await search(`q=${tag}&${win(50, 30)}`)).items.map((i) => i.id).join() === eOld.data.id);
+check("date range last 2 days excludes the old episode", (await search(`q=${tag}&${win(2, -1)}`)).items.length === 3);
+const p1 = await search(`q=${tag}&limit=2&offset=0`);
+const p2 = await search(`q=${tag}&limit=2&offset=2`);
+check("pagination: page 1 has 2 and hasMore", p1.items.length === 2 && p1.hasMore === true);
+check("pagination: page 2 has the rest, no overlap, no more", p2.items.length === 2 && p2.hasMore === false && !p2.items.some((i) => p1.items.some((j) => j.id === i.id)));
+check("results are newest first", [...p1.items, ...p2.items].every((it, i, a) => i === 0 || new Date(a[i - 1].onsetAt) >= new Date(it.onsetAt)));
+
+check("delete a fixture", (await call("DELETE", `/api/episodes/${e120.data.id}`)).status === 200);
+const sumDel = (await call("GET", "/api/dashboard/summary")).data;
+check("deleted episode leaves the dashboard totals", sumDel.total === sumAfter.total - 1);
+check("deleted episode leaves search", (await search(`q=${tag}`)).items.length === 3);
+check("deleted episode leaves symptom stats", ((await call("GET", "/api/dashboard/trends")).data.symptomFrequency.find((s) => s.name === "Itching")?.episodes ?? 0) === (tr.symptomFrequency.find((s) => s.name === "Itching")?.episodes ?? 0) - 1);
+
 console.log(failures ? `\n${failures} check(s) FAILED` : "\nAll checks passed");
 console.log(`created id for DB verification: ${id}`);
 process.exit(failures ? 1 : 0);

@@ -33,3 +33,18 @@ export const RESPONSE_LABEL = {
   complete: "Complete",
   unknown: "Unknown",
 } as const;
+
+export function formatMinutes(mins: number): string {
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  if (h < 48) return `${h} h ${mins % 60} min`;
+  return `${Math.floor(h / 24)} d ${h % 24} h`;
+}
+
+export const startOfDayIso = (d: string) => new Date(`${d}T00:00:00`).toISOString();
+export const endOfDayIso = (d: string) => new Date(`${d}T23:59:59.999`).toISOString();
+
+export const monthLabel = (ym: string) =>
+  new Date(`${ym}-01T12:00:00`).toLocaleDateString(undefined, { month: "short" });
+
+export const localTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;

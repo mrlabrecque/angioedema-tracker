@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import worker from "../src/index";
 import { signToken, verifyToken } from "../src/auth/token";
 import type { Env } from "../src/env";
+import { safeTimeZone } from "../src/dashboard";
 import { createEpisodeInput, exposureInput, treatmentInput, updateEpisodeInput } from "../src/validation";
 
 const PASSPHRASE = "correct horse battery staple";
@@ -128,6 +129,8 @@ describe("protected routes", () => {
       ["POST", `/api/episodes/${id}/symptoms`],
       ["POST", `/api/episodes/${id}/exposures`],
       ["POST", `/api/episodes/${id}/treatments`],
+      ["GET", "/api/dashboard/summary"],
+      ["GET", "/api/dashboard/trends"],
       ["GET", "/api/symptoms"],
       ["GET", "/api/exposures"],
     ];
@@ -217,5 +220,15 @@ describe("input validation", () => {
   it("rejects an empty update", () => {
     expect(updateEpisodeInput.safeParse({}).success).toBe(false);
     expect(updateEpisodeInput.safeParse({ resolutionAt: null }).success).toBe(true);
+  });
+});
+
+describe("dashboard helpers", () => {
+  it("accepts real time zones and falls back to UTC for anything else", () => {
+    expect(safeTimeZone("America/New_York")).toBe("America/New_York");
+    expect(safeTimeZone("Pacific/Auckland")).toBe("Pacific/Auckland");
+    expect(safeTimeZone(null)).toBe("UTC");
+    expect(safeTimeZone("Not/AZone")).toBe("UTC");
+    expect(safeTimeZone("'; drop table flare_episodes; --")).toBe("UTC");
   });
 });

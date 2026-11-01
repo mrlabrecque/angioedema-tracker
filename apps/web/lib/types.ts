@@ -50,3 +50,18 @@ export interface CatalogItem {
   id: string;
   name: string;
 }
+
+export interface Summary {
+  total: number;
+  active: number;
+  last30Days: number;
+  averageDurationMinutes: number | null;
+  episodesWithDuration: number;
+  mostRecent: { id: string; onsetAt: string } | null;
+}
+export interface Trends {
+  timeZone: string;
+  episodesByMonth: { month: string; episodes: number }[];
+  symptomFrequency: { name: string; episodes: number }[];
+  exposureReports: { category: string; episodes: number; clinicianConfirmed: number }[];
+}

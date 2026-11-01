@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import {
   episodeExposures,
   episodeSymptoms,
@@ -7,7 +7,7 @@ import {
   flareEpisodes,
   symptomCatalog,
 } from "@angioedema/database";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 import { withDb, type Db } from "./db";
 import type { Env } from "./env";
 import { json } from "./http";
@@ -70,17 +70,49 @@ export async function listCatalog(c: Ctx, which: "symptoms" | "exposures") {
   return json(c.request, c.env, { items: rows });
 }
 
+const isoParam = z.string().datetime({ offset: true });
+const escapeLike = (v: string) => v.replace(/[\\%_]/g, (m) => `\\${m}`);
+
 export async function listEpisodes(c: Ctx) {
   const url = new URL(c.request.url);
   const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 200);
+  const offset = Math.min(Math.max(Number(url.searchParams.get("offset")) || 0, 0), 100_000);
   const status = url.searchParams.get("status");
-  const where =
-    status === "active" || status === "resolved" || status === "unknown"
-      ? and(isNull(flareEpisodes.deletedAt), eq(flareEpisodes.status, status))
-      : isNull(flareEpisodes.deletedAt);
+  const q = (url.searchParams.get("q") ?? "").trim().slice(0, 100);
+  const from = isoParam.safeParse(url.searchParams.get("from"));
+  const to = isoParam.safeParse(url.searchParams.get("to"));
 
-  const items = await withDb(c.env, c.ec, async (db) => {
-    const eps = await db.select().from(flareEpisodes).where(where).orderBy(desc(flareEpisodes.onsetAt)).limit(limit);
+  const conditions = [isNull(flareEpisodes.deletedAt)];
+  if (status === "active" || status === "resolved" || status === "unknown") {
+    conditions.push(eq(flareEpisodes.status, status));
+  }
+  if (from.success) conditions.push(gte(flareEpisodes.onsetAt, new Date(from.data)));
+  if (to.success) conditions.push(lte(flareEpisodes.onsetAt, new Date(to.data)));
+  if (q) {
+    const p = `%${escapeLike(q)}%`;
+    conditions.push(
+      or(
+        sql`${flareEpisodes.generalNotes} ilike ${p}`,
+        sql`exists (select 1 from episode_symptoms s where s.episode_id = ${flareEpisodes.id}
+              and (s.symptom_type ilike ${p} or s.body_location ilike ${p} or s.notes ilike ${p}))`,
+        sql`exists (select 1 from episode_exposures x where x.episode_id = ${flareEpisodes.id}
+              and (x.exposure_category ilike ${p} or x.exposure_description ilike ${p} or x.notes ilike ${p}))`,
+        sql`exists (select 1 from episode_treatments t where t.episode_id = ${flareEpisodes.id}
+              and (t.medication_name ilike ${p} or t.notes ilike ${p}))`,
+      )!,
+    );
+  }
+
+  const result = await withDb(c.env, c.ec, async (db) => {
+    const rows = await db
+      .select()
+      .from(flareEpisodes)
+      .where(and(...conditions))
+      .orderBy(desc(flareEpisodes.onsetAt))
+      .limit(limit + 1)
+      .offset(offset);
+    const hasMore = rows.length > limit;
+    const eps = rows.slice(0, limit);
     const ids = eps.map((e) => e.id);
     const syms = ids.length
       ? await db
@@ -93,16 +125,19 @@ export async function listEpisodes(c: Ctx) {
           .from(episodeSymptoms)
           .where(inArray(episodeSymptoms.episodeId, ids))
       : [];
-    return eps.map((e) => ({
-      id: e.id,
-      onsetAt: e.onsetAt,
-      resolutionAt: e.resolutionAt,
-      status: e.status,
-      overallSeverity: e.overallSeverity,
-      symptoms: syms.filter((s) => s.episodeId === e.id),
-    }));
+    return {
+      hasMore,
+      items: eps.map((e) => ({
+        id: e.id,
+        onsetAt: e.onsetAt,
+        resolutionAt: e.resolutionAt,
+        status: e.status,
+        overallSeverity: e.overallSeverity,
+        symptoms: syms.filter((s) => s.episodeId === e.id),
+      })),
+    };
   });
-  return json(c.request, c.env, { items });
+  return json(c.request, c.env, result);
 }
 
 export async function createEpisode(c: Ctx) {

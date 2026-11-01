@@ -3,6 +3,7 @@ import { corsHeaders, json } from "./http";
 import { ConfigError, verifyPassphrase } from "./auth/passphrase";
 import { signToken, verifyToken, type TokenPayload } from "./auth/token";
 import { dbCheck } from "./db";
+import { summary, trends } from "./dashboard";
 import {
   addChild,
   createEpisode,
@@ -102,6 +103,8 @@ async function route(request: Request, env: Env, ec: ExecutionContext): Promise<
     path === "/api/episodes" ||
     path === "/api/symptoms" ||
     path === "/api/exposures" ||
+    path === "/api/dashboard/summary" ||
+    path === "/api/dashboard/trends" ||
     episodeMatch !== null;
   if (!isKnown) return json(request, env, { error: "not_found" }, 404);
 
@@ -119,6 +122,8 @@ async function route(request: Request, env: Env, ec: ExecutionContext): Promise<
 
   if (path === "/api/symptoms" && m === "GET") return listCatalog(c, "symptoms");
   if (path === "/api/exposures" && m === "GET") return listCatalog(c, "exposures");
+  if (path === "/api/dashboard/summary" && m === "GET") return summary(c);
+  if (path === "/api/dashboard/trends" && m === "GET") return trends(c);
   if (path === "/api/episodes") {
     if (m === "GET") return listEpisodes(c);
     if (m === "POST") return createEpisode(c);

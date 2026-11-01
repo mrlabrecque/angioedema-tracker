@@ -1,0 +1,29 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Build static site
+        run: npm run build:web
+        env:
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+          NEXT_PUBLIC_API_URL: https://example.invalid
+      - name: Scan build output for secrets
+        run: |
+          if grep -rEl "postgres(ql)?://|neon\.tech|npg_|AUTH_PASSPHRASE|TOKEN_SIGNING" apps/web/out; then
+            echo "Secret-like content found in static output" >&2; exit 1
+          fi

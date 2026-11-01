@@ -1,0 +1,24 @@
+{
+  "name": "@angioedema/database",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./schema/index.ts" },
+  "scripts": {
+    "generate": "drizzle-kit generate",
+    "migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "1.2.0",
+    "drizzle-orm": "0.45.4"
+  },
+  "devDependencies": {
+    "drizzle-kit": "0.31.11",
+    "tsx": "4.23.15",
+    "ws": "8.22.1",
+    "@types/ws": "^8.5.0",
+    "@types/node": "^22.0.0",
+    "typescript": "5.9.3"
+  }
+}

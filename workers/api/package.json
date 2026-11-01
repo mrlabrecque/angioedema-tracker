@@ -1,0 +1,24 @@
+{
+  "name": "@angioedema/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@angioedema/database": "*",
+    "@neondatabase/serverless": "1.2.0",
+    "drizzle-orm": "0.45.4"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.11",
+    "@cloudflare/workers-types": "^5.20261101.1",
+    "typescript": "5.9.3",
+    "vitest": "^4.1.0",
+    "wrangler": "4.156.0"
+  }
+}

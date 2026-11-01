@@ -1,0 +1,21 @@
+name = "angioedema-api"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# Non-secret config. Secrets (NEON_DATABASE_URL, AUTH_PASSPHRASE_HASH,
+# TOKEN_SIGNING_SECRET) are set with `wrangler secret put`.
+[vars]
+# Exact origin of the GitHub Pages site (scheme + host, no path, no trailing slash).
+ALLOWED_ORIGIN = "https://mrlabrecque.github.io"
+TOKEN_TTL_SECONDS = "43200"
+
+[[durable_objects.bindings]]
+name = "AUTH_LIMITER"
+class_name = "AuthLimiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AuthLimiter"]
+
+[observability]
+enabled = false

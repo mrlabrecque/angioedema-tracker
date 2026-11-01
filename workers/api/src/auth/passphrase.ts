@@ -1,5 +1,8 @@
 // Hash format: pbkdf2-sha256:<iterations>:<salt b64>:<hash b64>
 // Workers WebCrypto caps PBKDF2 at 100,000 iterations.
+/** Misconfiguration of a secret. The message never contains the secret's value. */
+export class ConfigError extends Error {}
+
 const enc = new TextEncoder();
 
 function fromB64(s: string): Uint8Array {
@@ -17,13 +20,13 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 export async function verifyPassphrase(passphrase: string, stored: string): Promise<boolean> {
-  const parts = stored.split(":");
+  const parts = stored.trim().split(":");
   if (parts.length !== 4 || parts[0] !== "pbkdf2-sha256") {
-    throw new Error("AUTH_PASSPHRASE_HASH is malformed");
+    throw new ConfigError("AUTH_PASSPHRASE_HASH is malformed");
   }
   const iterations = Number(parts[1]);
   if (!Number.isInteger(iterations) || iterations < 1 || iterations > 100_000) {
-    throw new Error("AUTH_PASSPHRASE_HASH has unsupported iterations");
+    throw new ConfigError("AUTH_PASSPHRASE_HASH has unsupported iterations");
   }
   const salt = fromB64(parts[2]!);
   const expected = fromB64(parts[3]!);

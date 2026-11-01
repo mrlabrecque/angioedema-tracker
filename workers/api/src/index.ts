@@ -1,6 +1,6 @@
 import type { Env } from "./env";
 import { corsHeaders, json } from "./http";
-import { verifyPassphrase } from "./auth/passphrase";
+import { ConfigError, verifyPassphrase } from "./auth/passphrase";
 import { signToken, verifyToken, type TokenPayload } from "./auth/token";
 import { dbCheck } from "./db";
 
@@ -110,7 +110,9 @@ export default {
     let res: Response;
     try {
       res = await route(request, env);
-    } catch {
+    } catch (err) {
+      // Only our own config errors are logged (their messages never hold values).
+      if (err instanceof ConfigError) console.log(`config error: ${err.message}`);
       // Never include error details: they may contain connection strings or data.
       res = json(request, env, { error: "internal_error" }, 500);
     }

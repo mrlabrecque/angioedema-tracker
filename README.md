@@ -22,7 +22,7 @@ npm run dev:api          # Worker on :8787 (needs workers/api/.dev.vars)
 npm run dev:web          # site on :3000 (set NEXT_PUBLIC_API_URL=http://localhost:8787 in apps/web/.env.local)
 npm run db:generate      # after schema changes
 npm run db:migrate       # needs packages/database/.env with DATABASE_URL (owner role)
-npm run hash-passphrase  # prints AUTH_PASSPHRASE_HASH
+npm run -s set-passphrase  # sets AUTH_PASSPHRASE_HASH on the Worker (no copy/paste)
 ```
 
 See [docs/setup.md](docs/setup.md), [docs/security.md](docs/security.md), [docs/migrations.md](docs/migrations.md).

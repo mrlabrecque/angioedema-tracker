@@ -2,8 +2,14 @@
   "name": "angioedema-tracker",
   "private": true,
   "version": "0.1.0",
-  "workspaces": ["apps/*", "workers/*", "packages/*"],
-  "engines": { "node": ">=20" },
+  "workspaces": [
+    "apps/*",
+    "workers/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
@@ -12,6 +18,7 @@
     "dev:api": "npm run dev -w workers/api",
     "db:generate": "npm run generate -w packages/database",
     "db:migrate": "npm run migrate -w packages/database",
-    "hash-passphrase": "node scripts/hash-passphrase.mjs"
+    "hash-passphrase": "node scripts/hash-passphrase.mjs",
+    "set-passphrase": "node scripts/set-passphrase.mjs"
   }
 }

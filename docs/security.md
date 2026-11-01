@@ -11,9 +11,8 @@
 
 ## Change the passphrase
 ```bash
-npm run hash-passphrase                              # enter the new passphrase
+npm run -s set-passphrase                            # prompts, hashes, stores the secret
 cd workers/api
-npx wrangler secret put AUTH_PASSPHRASE_HASH         # paste the new hash
 openssl rand -base64 32 | npx wrangler secret put TOKEN_SIGNING_SECRET   # invalidates all sessions
 ```
 

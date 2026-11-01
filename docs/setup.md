@@ -25,8 +25,7 @@
 cd workers/api
 npx wrangler login
 npx wrangler secret put NEON_DATABASE_URL      # app_worker connection string
-npm run hash-passphrase                         # from repo root; copy the output
-npx wrangler secret put AUTH_PASSPHRASE_HASH
+(cd ../.. && npm run -s set-passphrase)         # prompts, hashes, stores AUTH_PASSPHRASE_HASH
 openssl rand -base64 32 | npx wrangler secret put TOKEN_SIGNING_SECRET
 ```
 Set `ALLOWED_ORIGIN` in `workers/api/wrangler.toml` to `https://<github-user>.github.io` (scheme + host only).

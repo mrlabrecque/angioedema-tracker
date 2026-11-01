@@ -12,7 +12,8 @@
   "dependencies": {
     "@angioedema/database": "*",
     "@neondatabase/serverless": "1.2.0",
-    "drizzle-orm": "0.45.4"
+    "drizzle-orm": "0.45.4",
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.11",

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import worker from "../src/index";
 import { signToken, verifyToken } from "../src/auth/token";
 import type { Env } from "../src/env";
+import { createEpisodeInput, exposureInput, treatmentInput, updateEpisodeInput } from "../src/validation";
 
 const PASSPHRASE = "correct horse battery staple";
 const ORIGIN = "https://mrlabrecque.github.io";
@@ -35,7 +36,8 @@ async function call(path: string, init: RequestInit & { ip?: string; origin?: st
   headers.set("CF-Connecting-IP", ip);
   if (origin) headers.set("Origin", origin);
   const req = new Request(`https://api.test${path}`, { ...rest, headers });
-  return worker.fetch(req, await getEnv());
+  const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
+  return worker.fetch(req, await getEnv(), ctx);
 }
 
 const login = (passphrase: string, ip?: string) =>
@@ -112,7 +114,27 @@ describe("protected routes", () => {
   });
 
   it("returns 404 for unknown routes", async () => {
-    expect((await call("/api/episodes")).status).toBe(404);
+    expect((await call("/api/nope")).status).toBe(404);
+  });
+
+  it("requires a token on every episode route", async () => {
+    const id = "6f1c1d2e-8a3b-4c5d-9e0f-123456789abc";
+    const routes: [string, string][] = [
+      ["GET", "/api/episodes"],
+      ["POST", "/api/episodes"],
+      ["GET", `/api/episodes/${id}`],
+      ["PUT", `/api/episodes/${id}`],
+      ["DELETE", `/api/episodes/${id}`],
+      ["POST", `/api/episodes/${id}/symptoms`],
+      ["POST", `/api/episodes/${id}/exposures`],
+      ["POST", `/api/episodes/${id}/treatments`],
+      ["GET", "/api/symptoms"],
+      ["GET", "/api/exposures"],
+    ];
+    for (const [method, path] of routes) {
+      const res = await call(path, { method, body: method === "GET" || method === "DELETE" ? undefined : "{}" });
+      expect(res.status, `${method} ${path}`).toBe(401);
+    }
   });
 });
 
@@ -157,5 +179,43 @@ describe("global backstop", () => {
     }
     expect(locked).toBe(true);
     expect((await login(PASSPHRASE, "10.9.9.9")).status).toBe(429);
+  });
+});
+
+describe("input validation", () => {
+  const base = { clientRequestId: "6f1c1d2e-8a3b-4c5d-9e0f-123456789abc", onsetAt: "2026-11-01T10:00:00Z" };
+
+  it("accepts a minimal (incomplete) episode", () => {
+    const r = createEpisodeInput.safeParse(base);
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.symptoms).toEqual([]);
+  });
+
+  it("rejects bad ids, dates, severities and unknown fields", () => {
+    expect(createEpisodeInput.safeParse({ ...base, clientRequestId: "nope" }).success).toBe(false);
+    expect(createEpisodeInput.safeParse({ ...base, onsetAt: "yesterday" }).success).toBe(false);
+    expect(createEpisodeInput.safeParse({ ...base, overallSeverity: 11 }).success).toBe(false);
+    expect(createEpisodeInput.safeParse({ ...base, overallSeverity: 0 }).success).toBe(false);
+    expect(createEpisodeInput.safeParse({ ...base, status: "cured" }).success).toBe(false);
+    expect(createEpisodeInput.safeParse({ ...base, extra: 1 }).success).toBe(false);
+    expect(
+      createEpisodeInput.safeParse({ ...base, symptoms: [{ symptomType: "Hives", severity: 99 }] }).success,
+    ).toBe(false);
+  });
+
+  it("defaults an exposure to 'unknown' and never accepts auto-confirmation values", () => {
+    const e = exposureInput.parse({ exposureCategory: "Food" });
+    expect(e.suspectedRelationship).toBe("unknown");
+    expect(exposureInput.safeParse({ exposureCategory: "Food", suspectedRelationship: "confirmed" }).success).toBe(false);
+  });
+
+  it("requires medication name and administration time for treatments", () => {
+    expect(treatmentInput.safeParse({ medicationName: "X" }).success).toBe(false);
+    expect(treatmentInput.safeParse({ medicationName: "X", administrationTime: "2026-11-01T10:00:00Z" }).success).toBe(true);
+  });
+
+  it("rejects an empty update", () => {
+    expect(updateEpisodeInput.safeParse({}).success).toBe(false);
+    expect(updateEpisodeInput.safeParse({ resolutionAt: null }).success).toBe(true);
   });
 });

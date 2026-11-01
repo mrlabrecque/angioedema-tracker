@@ -3,6 +3,15 @@ import { corsHeaders, json } from "./http";
 import { ConfigError, verifyPassphrase } from "./auth/passphrase";
 import { signToken, verifyToken, type TokenPayload } from "./auth/token";
 import { dbCheck } from "./db";
+import {
+  addChild,
+  createEpisode,
+  deleteEpisode,
+  getEpisode,
+  listCatalog,
+  listEpisodes,
+  updateEpisode,
+} from "./episodes";
 
 export { AuthLimiter } from "./auth/rate-limiter";
 
@@ -62,7 +71,7 @@ async function login(request: Request, env: Env): Promise<Response> {
   return json(request, env, { token, expiresAt: payload.exp * 1000 });
 }
 
-async function route(request: Request, env: Env): Promise<Response> {
+async function route(request: Request, env: Env, ec: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
 
@@ -86,30 +95,55 @@ async function route(request: Request, env: Env): Promise<Response> {
   }
 
   // Everything below requires a valid, unrevoked token.
-  const isKnown = path === "/api/auth/logout" || path === "/api/system/db-check";
+  const episodeMatch = /^\/api\/episodes\/([^/]+)(?:\/(symptoms|exposures|treatments))?$/.exec(path);
+  const isKnown =
+    path === "/api/auth/logout" ||
+    path === "/api/system/db-check" ||
+    path === "/api/episodes" ||
+    path === "/api/symptoms" ||
+    path === "/api/exposures" ||
+    episodeMatch !== null;
   if (!isKnown) return json(request, env, { error: "not_found" }, 404);
 
   const auth = await authenticate(request, env);
   if (!auth) return json(request, env, { error: "unauthorized" }, 401);
 
-  if (path === "/api/auth/logout" && request.method === "POST") {
+  const m = request.method;
+  const c = { request, env, ec };
+
+  if (path === "/api/auth/logout" && m === "POST") {
     await limiter(env).revoke(auth.jti, auth.exp);
     return json(request, env, { ok: true });
   }
+  if (path === "/api/system/db-check" && m === "GET") return json(request, env, await dbCheck(env));
 
-  if (path === "/api/system/db-check" && request.method === "GET") {
-    return json(request, env, await dbCheck(env));
+  if (path === "/api/symptoms" && m === "GET") return listCatalog(c, "symptoms");
+  if (path === "/api/exposures" && m === "GET") return listCatalog(c, "exposures");
+  if (path === "/api/episodes") {
+    if (m === "GET") return listEpisodes(c);
+    if (m === "POST") return createEpisode(c);
+  }
+  if (episodeMatch) {
+    const id = episodeMatch[1]!;
+    const child = episodeMatch[2] as "symptoms" | "exposures" | "treatments" | undefined;
+    if (!child) {
+      if (m === "GET") return getEpisode(c, id);
+      if (m === "PUT") return updateEpisode(c, id);
+      if (m === "DELETE") return deleteEpisode(c, id);
+    } else if (m === "POST") {
+      return addChild(c, id, child);
+    }
   }
 
   return json(request, env, { error: "method_not_allowed" }, 405);
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ec: ExecutionContext): Promise<Response> {
     const started = Date.now();
     let res: Response;
     try {
-      res = await route(request, env);
+      res = await route(request, env, ec);
     } catch (err) {
       // Only our own config errors are logged (their messages never hold values).
       if (err instanceof ConfigError) console.log(`config error: ${err.message}`);

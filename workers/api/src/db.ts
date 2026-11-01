@@ -1,11 +1,25 @@
-import { neon } from "@neondatabase/serverless";
+import { neon, Pool } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
+import { drizzle as drizzleWs } from "drizzle-orm/neon-serverless";
 import { sql } from "drizzle-orm";
+import * as schema from "@angioedema/database";
 import { EXPECTED_TABLES } from "@angioedema/database";
 import type { Env } from "./env";
 
 export function getDb(env: Env) {
   return drizzle(neon(env.NEON_DATABASE_URL));
+}
+
+export type Db = ReturnType<typeof drizzleWs<typeof schema>>;
+
+/** WebSocket pool client (supports transactions). One short-lived pool per request. */
+export async function withDb<T>(env: Env, ctx: ExecutionContext, fn: (db: Db) => Promise<T>): Promise<T> {
+  const pool = new Pool({ connectionString: env.NEON_DATABASE_URL });
+  try {
+    return await fn(drizzleWs(pool, { schema }));
+  } finally {
+    ctx.waitUntil(pool.end());
+  }
 }
 
 /** Connectivity/schema check. Returns counts and booleans only — never row data. */
